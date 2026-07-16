@@ -16,8 +16,16 @@ def allowed_hdfs_roots(user:User, active_department:str|None=None)->list[str]:
         roots.append(department_root(dep))
     else: roots += [department_root(d) for d in deps]
     return sorted(set(roots))
+def normalize_hdfs_path(path:str)->str:
+    if not path.startswith('/'): raise AccessDenied(f"path must be absolute: {path}")
+    segs=[]
+    for s in path.split('/'):
+        if s=='' or s=='.': continue  # collapse repeated slashes and no-op segments
+        if s=='..': raise AccessDenied(f"path traversal not allowed: {path}")
+        segs.append(s)
+    return '/'+'/'.join(segs)
 def assert_hdfs_path_allowed(user:User,path:str,active_department:str|None=None)->None:
-    p=path.rstrip('/') or '/'
+    p=normalize_hdfs_path(path)
     if any(p==r or p.startswith(r+'/') for r in allowed_hdfs_roots(user,active_department)): return
     raise AccessDenied(f"path not allowed: {path}")
 def qdrant_filter(user:User, active_department:str)->dict:

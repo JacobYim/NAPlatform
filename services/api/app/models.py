@@ -11,3 +11,17 @@ class AdminUserUpdate(BaseModel):
     status:UserStatus|None=None; departments:list[str]|None=None; password:str|None=Field(default=None, min_length=8)
 class AgentContext(BaseModel):
     user_id:str; username:str; department:str; hdfs_roots:list[str]; qdrant_filter:dict; neo4j_filter:dict; allowed_tools:list[str]; allowed_mcp_servers:list[str]
+class CoreWebUILaunchConfig(BaseModel):
+    brand_name:str; brand_logo:str; api_base_url:str; webui_url:str
+class SessionBootstrapResponse(BaseModel):
+    user_id:str; username:str; email:EmailStr; is_admin:bool; status:UserStatus; departments:list[str]; default_department:str|None; core_webui:CoreWebUILaunchConfig
+class ChatRequest(BaseModel):
+    message:str=Field(min_length=1); session_id:str|None=None
+class ChatResponse(BaseModel):
+    department:str; user_id:str; username:str; hdfs_roots:list[str]; allowed_tools:list[str]; allowed_mcp_servers:list[str]; reply:str; hermes_invoked:bool=False
+class ResourceListResponse(BaseModel):
+    department:str; path:str; allowed_roots:list[str]; entries:list[str]
+class HdfsCheckRequest(BaseModel):
+    path:str; department:str|None=None
+class PendingApproval(BaseModel):
+    user_id:str; email:EmailStr; username:str; departments:list[str]; status:UserStatus=UserStatus.pending
