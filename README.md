@@ -18,6 +18,20 @@ Auth state is now backed by SQLAlchemy instead of in-process dicts, keeping the 
 
 Environment: `DATABASE_URL`, `REDIS_URL`, `SESSION_TTL_SECONDS`, `ADMIN_PASSWORD`.
 
+## Phase 04 — HDFS workspace provisioning (dry-run by default)
+
+`app/hdfs.py`'s `HdfsProvisioner` turns the RBAC HDFS roots into safe, deterministic `hdfs dfs` command plans and only executes them when explicitly enabled:
+
+- **Command plan** — personal dir `/naplatform/users/{username}` gets `mkdir -p` → `chown/chgrp` (placeholder) → `chmod 700` → `setfacl -m user:{username}:rwx`; each department dir `/naplatform/departments/{DEP}` gets `chmod 770` → `setfacl -m group:naplatform-{dep}:rwx` plus `setfacl -m user:{username}:rwx`.
+- **Validation** — usernames must match `^[A-Za-z0-9_][A-Za-z0-9_.-]{2,63}$` (no leading dot/dash, no `..`), departments must be known, and every built path is re-checked to stay under `/naplatform` with no traversal.
+- **Dry-run vs enabled** — with `HDFS_PROVISIONING_ENABLED` unset/false (the default) provisioning is a **dry run**: it returns the planned commands and spawns **no subprocess**. Set `HDFS_PROVISIONING_ENABLED=true` to actually run each command via `subprocess.run` (argv list, no shell) and capture `returncode/stdout/stderr`.
+- **Endpoints** — `POST /admin/users/{user_id}/provision-hdfs` (admin-only) returns the provision plan/results for a user's personal + department dirs; `GET /workspace/hdfs` (active user) returns the caller's own personal root, department roots, and the dry-run plan with provisioning status.
+- **Audit** — `hdfs_provision` and `workspace_view` events are recorded.
+
+**Kerberos (production):** the `chown/chgrp` steps are placeholders — in production, directory ownership and access are enforced by Kerberos principals / proxy-users and HDFS ACLs, and provisioning runs as a keytab-authenticated service account, not by ad-hoc CLI calls.
+
+Environment (Phase 04): `HDFS_PROVISIONING_ENABLED`, `HDFS_BIN`, `HDFS_DEPARTMENT_GROUP_PREFIX`.
+
 The actual post-login runtime UI is `github.com/JacobYim/core-webui`. The Compose `ui` service builds that repository and applies HMGMA branding with `BRAND_NAME=HMGMA` and the included `branding/logo.jpg` (`HMG Metaplant America`).
 
 ## Verify

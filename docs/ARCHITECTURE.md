@@ -72,3 +72,32 @@ startup 시 테이블을 auto-create한다(scaffold).
 
 pytest 커버리지: sqlite temp DB에서 Store 인스턴스 간 영속성, 세션 TTL 만료, audit event 생성,
 reset token 만료 영속성, Redis 미가용 시 in-memory fallback, 그리고 기존 30개 테스트 유지.
+
+## Phase 04 — HDFS workspace provisioning (scaffold)
+
+RBAC가 정의하는 HDFS root(개인 `/naplatform/users/{username}`, 부서 `/naplatform/departments/{DEP}`)에
+디렉토리/ACL을 실제로 배치하기 위한 provisioning scaffold를 추가했다. 핵심 설계는 **안전한 명령 계획을
+먼저 만들고(dry-run), 명시적으로 활성화됐을 때만 실행**하는 것이다.
+
+- **`app/hdfs.py` — `HdfsProvisioner`** — 사용자/부서를 검증한 뒤 결정적인 `hdfs dfs` 명령 계획을
+  만든다. 개인 디렉토리는 `mkdir -p` → `chown/chgrp`(placeholder) → `chmod 700` → `setfacl -m user:{username}:rwx`,
+  부서 디렉토리는 `chmod 770` → `setfacl -m group:naplatform-{dep}:rwx` + `setfacl -m user:{username}:rwx`
+  로 구성된다.
+- **입력 검증** — username은 `^[A-Za-z0-9_][A-Za-z0-9_.-]{2,63}$`(선행 dot/dash 금지)만 허용하고 `..`를
+  거부한다. 부서는 `DEPARTMENTS`에 없으면 거부하며, 완성된 경로는 `normalize_hdfs_path`로 재검증하여
+  traversal 없이 `BASE` 하위에 있음을 보장한다.
+- **Dry-run vs enabled** — `HDFS_PROVISIONING_ENABLED=true`가 아니면 **subprocess를 전혀 실행하지 않고**
+  계획만 반환한다(`dry_run=true`, `results=[]`). 활성화되면 각 명령을 argv list로 `subprocess.run`(shell 미사용)
+  하여 `returncode/stdout/stderr`를 결과에 담는다.
+- **Endpoints** — `POST /admin/users/{user_id}/provision-hdfs`(admin 전용)는 해당 사용자의 개인/부서
+  디렉토리 provision plan(및 enabled 시 결과)을 반환한다. `GET /workspace/hdfs`(active user)는 본인의
+  personal root, department roots, provisioning status와 dry-run plan만 반환한다.
+- **Audit** — `hdfs_provision`, `workspace_view` 이벤트가 `audit_events`에 기록된다.
+
+**Kerberos production note:** scaffold의 `chown/chgrp`는 placeholder다. Production에서는 개별
+`hdfs dfs` 명령이 아니라 Kerberos principal/proxy-user와 HDFS ACL로 소유권·접근을 강제해야 하며,
+provisioning 실행 주체는 keytab으로 인증된 서비스 계정이어야 한다.
+
+pytest 커버리지: 개인/부서 명령 계획, traversal/invalid username 거부, admin만 provision 가능,
+active user는 본인 root만 조회, 비-admin provision 거부, dry-run 기본값에서 subprocess 미실행,
+그리고 audit 기록.

@@ -1,7 +1,8 @@
 import os
 from uuid import uuid4
 from fastapi import Depends, FastAPI, Header, HTTPException
-from .models import AgentContext, AdminUserUpdate, AuditEvent, ChatRequest, ChatResponse, CoreWebUILaunchConfig, HdfsCheckRequest, LoginRequest, PendingApproval, ResourceListResponse, SessionBootstrapResponse, SignupRequest, User, UserStatus
+from .models import AgentContext, AdminUserUpdate, AuditEvent, ChatRequest, ChatResponse, CoreWebUILaunchConfig, HdfsCheckRequest, HdfsProvisionReport, LoginRequest, PendingApproval, ResourceListResponse, SessionBootstrapResponse, SignupRequest, User, UserStatus, WorkspaceHdfsResponse
+from .hdfs import HdfsProvisioner, ProvisioningError
 from .rbac import AccessDenied, allowed_hdfs_roots, allowed_mcp_servers, allowed_tools, assert_hdfs_path_allowed, neo4j_filter, normalize_department, qdrant_filter
 from .security import hash_password, verify_password
 from .store import store
@@ -94,3 +95,18 @@ def check(path:str,department:str|None=None,user:User=Depends(require_active)):
 @app.get('/admin/approvals/pending',response_model=list[PendingApproval])
 def pending_approvals(_:User=Depends(require_admin)):
     return [PendingApproval(user_id=u.id,email=u.email,username=u.username,departments=u.departments,status=u.status) for u in store.list_pending()]
+@app.post('/admin/users/{user_id}/provision-hdfs',response_model=HdfsProvisionReport)
+def provision_hdfs(user_id:str,admin:User=Depends(require_admin)):
+    u=store.get_user(user_id)
+    if not u: raise HTTPException(404,"user not found")
+    try: report=HdfsProvisioner().provision_user(u)
+    except (ProvisioningError,ValueError) as e:
+        store.add_audit_event("hdfs_provision",user_id=user_id,actor=admin.email,success=False,detail=str(e)); raise HTTPException(400,str(e))
+    store.add_audit_event("hdfs_provision",user_id=user_id,actor=admin.email,success=True,detail=f"enabled={report.enabled} dry_run={report.dry_run} dirs={len(report.targets)}")
+    return report
+@app.get('/workspace/hdfs',response_model=WorkspaceHdfsResponse)
+def workspace_hdfs(user:User=Depends(require_active)):
+    try: resp=HdfsProvisioner().workspace(user)
+    except (ProvisioningError,ValueError) as e: raise HTTPException(400,str(e))
+    store.add_audit_event("workspace_view",user_id=user.id,actor=user.email,success=True,detail=f"hdfs status={resp.provisioning_status}")
+    return resp
