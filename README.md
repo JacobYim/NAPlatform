@@ -17,3 +17,7 @@ docker compose config
 ```
 
 Local seeded admin: `admin@example.com` / `ChangeMe123!`.
+
+## Branching
+
+See `docs/BRANCHING.md`. Phase branches merge into `dev`; `main` remains the stable/default branch and is updated from `dev` only after all planned phases are complete.
