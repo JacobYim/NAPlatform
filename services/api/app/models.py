@@ -28,3 +28,13 @@ class PendingApproval(BaseModel):
     user_id:str; email:EmailStr; username:str; departments:list[str]; status:UserStatus=UserStatus.pending
 class AuditEvent(BaseModel):
     id:int; action:str; user_id:str|None=None; actor:str|None=None; success:bool=True; detail:str|None=None; created_at:datetime
+class HdfsCommandPlan(BaseModel):
+    command:str; description:str; argv:list[str]=Field(default_factory=list)
+class HdfsCommandResult(BaseModel):
+    command:str; description:str; executed:bool=False; returncode:int|None=None; stdout:str=""; stderr:str=""
+class HdfsDirProvision(BaseModel):
+    path:str; kind:str; owner:str; group:str; mode:str; plan:list[HdfsCommandPlan]=Field(default_factory=list); results:list[HdfsCommandResult]=Field(default_factory=list)
+class HdfsProvisionReport(BaseModel):
+    user_id:str|None=None; username:str; enabled:bool; dry_run:bool; targets:list[HdfsDirProvision]=Field(default_factory=list)
+class WorkspaceHdfsResponse(BaseModel):
+    user_id:str; username:str; personal_root:str; department_roots:list[str]; enabled:bool; dry_run:bool; provisioning_status:str; plan:list[HdfsDirProvision]=Field(default_factory=list)
