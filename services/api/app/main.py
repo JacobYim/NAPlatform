@@ -1,10 +1,11 @@
+import os
 from uuid import uuid4
 from fastapi import Depends, FastAPI, Header, HTTPException
 from .models import AgentContext, AdminUserUpdate, LoginRequest, SignupRequest, User, UserStatus
 from .rbac import AccessDenied, allowed_hdfs_roots, allowed_mcp_servers, allowed_tools, assert_hdfs_path_allowed, neo4j_filter, normalize_department, qdrant_filter
 from .security import hash_password, new_token, verify_password
 from .store import store
-app=FastAPI(title="NAPlatform API",version="0.1.0"); store.seed_admin()
+app=FastAPI(title="NAPlatform API",version="0.1.0"); store.seed_admin(password=os.environ.get("ADMIN_PASSWORD","ChangeMe123!"))
 def current_user(authorization:str|None=Header(default=None))->User:
     if not authorization or not authorization.startswith("Bearer "): raise HTTPException(401,"missing bearer token")
     u=store.get_session_user(authorization.removeprefix("Bearer ").strip())

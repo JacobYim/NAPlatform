@@ -7,6 +7,11 @@ services:
   redis:
     image: redis:7-alpine
     ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
   qdrant:
     image: qdrant/qdrant:v1.12.4
     ports: ["6333:6333"]
@@ -20,12 +25,13 @@ services:
     image: apache/hadoop:3.4.1
     hostname: hdfs-namenode
     user: root
-    command: ["hdfs", "namenode"]
+    command: ["bash", "/bootstrap/bootstrap-namenode.sh"]
     ports: ["9870:9870", "9000:9000"]
     volumes:
       - hdfs-namenode:/tmp/hadoop-root/dfs/name
       - ./infra/hadoop/core-site.xml:/opt/hadoop/etc/hadoop/core-site.xml:ro
       - ./infra/hadoop/hdfs-site.xml:/opt/hadoop/etc/hadoop/hdfs-site.xml:ro
+      - ./infra/hadoop/bootstrap-namenode.sh:/bootstrap/bootstrap-namenode.sh:ro
   hdfs-datanode-1: &dn
     image: apache/hadoop:3.4.1
     user: root
