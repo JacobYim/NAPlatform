@@ -1,0 +1,90 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment: {POSTGRES_USER: nap, POSTGRES_PASSWORD: nap, POSTGRES_DB: naplatform}
+    ports: ["5432:5432"]
+    volumes: [postgres-data:/var/lib/postgresql/data]
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    ports: ["6333:6333"]
+    volumes: [qdrant-data:/qdrant/storage]
+  neo4j:
+    image: neo4j:5-community
+    environment: {NEO4J_AUTH: neo4j/naplatform-password}
+    ports: ["7474:7474", "7687:7687"]
+    volumes: [neo4j-data:/data]
+  hdfs-namenode:
+    image: apache/hadoop:3.4.1
+    hostname: hdfs-namenode
+    user: root
+    command: ["hdfs", "namenode"]
+    ports: ["9870:9870", "9000:9000"]
+    volumes:
+      - hdfs-namenode:/tmp/hadoop-root/dfs/name
+      - ./infra/hadoop/core-site.xml:/opt/hadoop/etc/hadoop/core-site.xml:ro
+      - ./infra/hadoop/hdfs-site.xml:/opt/hadoop/etc/hadoop/hdfs-site.xml:ro
+  hdfs-datanode-1: &dn
+    image: apache/hadoop:3.4.1
+    user: root
+    command: ["hdfs", "datanode"]
+    depends_on: [hdfs-namenode]
+    volumes:
+      - hdfs-datanode-1:/tmp/hadoop-root/dfs/data
+      - ./infra/hadoop/core-site.xml:/opt/hadoop/etc/hadoop/core-site.xml:ro
+      - ./infra/hadoop/hdfs-site.xml:/opt/hadoop/etc/hadoop/hdfs-site.xml:ro
+  hdfs-datanode-2:
+    <<: *dn
+    volumes:
+      - hdfs-datanode-2:/tmp/hadoop-root/dfs/data
+      - ./infra/hadoop/core-site.xml:/opt/hadoop/etc/hadoop/core-site.xml:ro
+      - ./infra/hadoop/hdfs-site.xml:/opt/hadoop/etc/hadoop/hdfs-site.xml:ro
+  hdfs-datanode-3:
+    <<: *dn
+    volumes:
+      - hdfs-datanode-3:/tmp/hadoop-root/dfs/data
+      - ./infra/hadoop/core-site.xml:/opt/hadoop/etc/hadoop/core-site.xml:ro
+      - ./infra/hadoop/hdfs-site.xml:/opt/hadoop/etc/hadoop/hdfs-site.xml:ro
+  hdfs-init:
+    image: apache/hadoop:3.4.1
+    command: ["bash", "/bootstrap/init-hdfs.sh"]
+    depends_on: [hdfs-namenode]
+    volumes:
+      - ./infra/hadoop/core-site.xml:/opt/hadoop/etc/hadoop/core-site.xml:ro
+      - ./infra/hadoop/hdfs-site.xml:/opt/hadoop/etc/hadoop/hdfs-site.xml:ro
+      - ./infra/hadoop/init-hdfs.sh:/bootstrap/init-hdfs.sh:ro
+  api:
+    build: {context: ./services/api}
+    environment:
+      DATABASE_URL: postgresql+psycopg://nap:nap@postgres:5432/naplatform
+      REDIS_URL: redis://redis:6379/0
+      ADMIN_PASSWORD: ChangeMe123!
+    ports: ["8080:8080"]
+    depends_on: [postgres, redis, qdrant, neo4j]
+  ui:
+    build: {context: ./services/ui}
+    ports: ["3000:80"]
+    depends_on: [api]
+  hermes-er: &agent
+    build: {context: ./services/hermes-agent}
+    environment: {DEPARTMENT: ER, HERMES_PROFILE: ER, API_BASE_URL: 'http://api:8080', HDFS_NAMENODE: 'hdfs://hdfs-namenode:9000'}
+    depends_on: [api, hdfs-namenode]
+  hermes-it:
+    <<: *agent
+    environment: {DEPARTMENT: IT, HERMES_PROFILE: IT, API_BASE_URL: 'http://api:8080', HDFS_NAMENODE: 'hdfs://hdfs-namenode:9000'}
+  hermes-ehs:
+    <<: *agent
+    environment: {DEPARTMENT: EHS, HERMES_PROFILE: EHS, API_BASE_URL: 'http://api:8080', HDFS_NAMENODE: 'hdfs://hdfs-namenode:9000'}
+  hermes-qc:
+    <<: *agent
+    environment: {DEPARTMENT: QC, HERMES_PROFILE: QC, API_BASE_URL: 'http://api:8080', HDFS_NAMENODE: 'hdfs://hdfs-namenode:9000'}
+volumes:
+  postgres-data: {}
+  qdrant-data: {}
+  neo4j-data: {}
+  hdfs-namenode: {}
+  hdfs-datanode-1: {}
+  hdfs-datanode-2: {}
+  hdfs-datanode-3: {}
