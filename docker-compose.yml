@@ -70,8 +70,21 @@ services:
     ports: ["8080:8080"]
     depends_on: [postgres, redis, qdrant, neo4j]
   ui:
-    build: {context: ./services/ui}
-    ports: ["3000:80"]
+    # Runtime UI is JacobYim/core-webui, not a local placeholder.
+    # Override CORE_WEBUI_CONTEXT=../core-webui for local offline development.
+    build:
+      context: ${CORE_WEBUI_CONTEXT:-https://github.com/JacobYim/core-webui.git}
+    environment:
+      BRAND_NAME: HMGMA
+      BRAND_LOGO: /apptoo/branding/logo.jpg
+      HERMES_WEBUI_HOST: 0.0.0.0
+      HERMES_WEBUI_PORT: 8787
+      HERMES_WEBUI_STATE_DIR: /home/hermeswebui/.hermes/webui
+      NAPLATFORM_API_BASE_URL: http://api:8080
+    ports: ["3000:8787"]
+    volumes:
+      - ui-hermes-home:/home/hermeswebui/.hermes
+      - ui-workspace:/workspace
     depends_on: [api]
   hermes-er: &agent
     build: {context: ./services/hermes-agent}
@@ -94,3 +107,5 @@ volumes:
   hdfs-datanode-1: {}
   hdfs-datanode-2: {}
   hdfs-datanode-3: {}
+  ui-hermes-home: {}
+  ui-workspace: {}
