@@ -49,3 +49,26 @@ Pydantic request/response 모델(`SessionBootstrapResponse`, `CoreWebUILaunchCon
 `ChatResponse`, `ResourceListResponse`, `PendingApproval`)과 pytest 커버리지(부트스트랩 거부/허용,
 부서 격리 chat, resource 경로 enforcement, admin pending 목록)가 추가되었다.
 다음 단계는 이 stub을 실제 Hermes agent 호출로 교체하는 것이다.
+
+## Phase 03 — Persistent auth/RBAC (scaffold)
+
+인증/RBAC 상태를 in-memory dict에서 SQLAlchemy 백엔드로 옮겼다. 기존 API 계약과 store method
+surface는 그대로 유지되어 Phase 02 test/import가 계속 동작한다. Alembic은 아직 도입하지 않고
+startup 시 테이블을 auto-create한다(scaffold).
+
+- **`app/db.py`** — SQLAlchemy 테이블 `users`, `user_departments`, `audit_events`,
+  `password_reset_tokens`. `DATABASE_URL`(Compose에서 `postgresql+psycopg://…`)을 사용하고,
+  test/offline에서는 SQLite(in-memory `StaticPool` 또는 파일)로 fallback한다.
+- **`app/store.py`** — SQLAlchemy 기반 `Store`. users/audit/reset token을 영속화하며 세션은
+  주입된 session store에 위임한다. `Store(database_url=..., session_store=...)`로 격리된 test 구성이
+  가능하고, `InMemoryStore`는 하위호환 alias로 남는다.
+- **`app/session_store.py`** — `SessionStore` 인터페이스. `RedisSessionStore`(`REDIS_URL`,
+  `SETEX` TTL)와 `MemorySessionStore` fallback. `build_session_store()`는 `REDIS_URL`이 설정되고
+  연결되면 Redis를, 아니면 in-memory를 선택한다. TTL 기본값은 `SESSION_TTL_SECONDS`(3600s).
+- **Password reset** — `POST /auth/password-reset/request`는 `expires_at` TTL을 가진 reset token
+  row를 영속화하고, 응답에는 토큰을 노출하지 않는다.
+- **Audit log** — signup, login 성공/실패, admin user update, password-reset 요청, agent chat이
+  `audit_events`에 기록된다. `GET /admin/audit?limit=N`(admin 전용)으로 최신순 조회한다.
+
+pytest 커버리지: sqlite temp DB에서 Store 인스턴스 간 영속성, 세션 TTL 만료, audit event 생성,
+reset token 만료 영속성, Redis 미가용 시 in-memory fallback, 그리고 기존 30개 테스트 유지.

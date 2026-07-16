@@ -1,9 +1,9 @@
 import os
 from uuid import uuid4
 from fastapi import Depends, FastAPI, Header, HTTPException
-from .models import AgentContext, AdminUserUpdate, ChatRequest, ChatResponse, CoreWebUILaunchConfig, HdfsCheckRequest, LoginRequest, PendingApproval, ResourceListResponse, SessionBootstrapResponse, SignupRequest, User, UserStatus
+from .models import AgentContext, AdminUserUpdate, AuditEvent, ChatRequest, ChatResponse, CoreWebUILaunchConfig, HdfsCheckRequest, LoginRequest, PendingApproval, ResourceListResponse, SessionBootstrapResponse, SignupRequest, User, UserStatus
 from .rbac import AccessDenied, allowed_hdfs_roots, allowed_mcp_servers, allowed_tools, assert_hdfs_path_allowed, neo4j_filter, normalize_department, qdrant_filter
-from .security import hash_password, new_token, verify_password
+from .security import hash_password, verify_password
 from .store import store
 app=FastAPI(title="NAPlatform API",version="0.1.0"); store.seed_admin(password=os.environ.get("ADMIN_PASSWORD","ChangeMe123!"))
 def current_user(authorization:str|None=Header(default=None))->User:
@@ -23,29 +23,32 @@ def health(): return {"status":"ok"}
 def signup(req:SignupRequest):
     dep=normalize_department(req.department); u=User(id=str(uuid4()),email=req.email,username=req.username,password_hash=hash_password(req.password),status=UserStatus.pending,departments=[dep])
     try: store.add_user(u)
-    except ValueError as e: raise HTTPException(409,str(e))
+    except ValueError as e: store.add_audit_event("signup",actor=req.email,success=False,detail=str(e)); raise HTTPException(409,str(e))
+    store.add_audit_event("signup",user_id=u.id,actor=u.email,success=True,detail=f"department={dep}")
     return {"id":u.id,"status":u.status,"message":"admin approval required"}
 @app.post('/auth/login')
 def login(req:LoginRequest):
     u=store.get_user_by_email(req.email)
-    if not u or not verify_password(req.password,u.password_hash): raise HTTPException(401,"invalid credentials")
-    if u.status!=UserStatus.active: raise HTTPException(403,"user is not active")
+    if not u or not verify_password(req.password,u.password_hash): store.add_audit_event("login",actor=req.email,success=False,detail="invalid credentials"); raise HTTPException(401,"invalid credentials")
+    if u.status!=UserStatus.active: store.add_audit_event("login",user_id=u.id,actor=u.email,success=False,detail="user is not active"); raise HTTPException(403,"user is not active")
+    store.add_audit_event("login",user_id=u.id,actor=u.email,success=True)
     return {"token":store.create_session(u.id),"user_id":u.id,"is_admin":u.is_admin}
 @app.post('/auth/password-reset/request')
 def password_reset(email:str):
     u=store.get_user_by_email(email)
-    if u: store.password_reset_tokens[new_token()]=u.id
+    if u: store.create_reset_token(u.id)
+    store.add_audit_event("password_reset_request",user_id=u.id if u else None,actor=email,success=bool(u))
     return {"message":"if the email exists, a reset email will be sent"}
 @app.get('/admin/users')
-def users(_:User=Depends(require_admin)): return [u.model_dump(exclude={'password_hash'}) for u in store.users.values()]
+def users(_:User=Depends(require_admin)): return [u.model_dump(exclude={'password_hash'}) for u in store.list_users()]
 @app.patch('/admin/users/{user_id}')
-def update_user(user_id:str, update:AdminUserUpdate, _:User=Depends(require_admin)):
-    u=store.get_user(user_id)
+def update_user(user_id:str, update:AdminUserUpdate, admin:User=Depends(require_admin)):
+    u=store.update_user(user_id,status=update.status,departments=[normalize_department(d) for d in update.departments] if update.departments is not None else None,password_hash=hash_password(update.password) if update.password is not None else None)
     if not u: raise HTTPException(404,"user not found")
-    if update.status is not None: u.status=update.status
-    if update.departments is not None: u.departments=[normalize_department(d) for d in update.departments]
-    if update.password is not None: u.password_hash=hash_password(update.password)
+    store.add_audit_event("admin_user_update",user_id=user_id,actor=admin.email,success=True,detail=f"status={update.status} departments={update.departments}")
     return u.model_dump(exclude={'password_hash'})
+@app.get('/admin/audit',response_model=list[AuditEvent])
+def audit(limit:int=100,_:User=Depends(require_admin)): return store.list_audit_events(limit=limit)
 def build_agent_context(user:User,department:str)->AgentContext:
     dep=normalize_department(department)
     return AgentContext(user_id=user.id,username=user.username,department=dep,hdfs_roots=allowed_hdfs_roots(user,dep),qdrant_filter=qdrant_filter(user,dep),neo4j_filter=neo4j_filter(user,dep),allowed_tools=allowed_tools(user,dep),allowed_mcp_servers=allowed_mcp_servers(user,dep))
@@ -65,6 +68,7 @@ def agent_chat(department:str,req:ChatRequest,user:User=Depends(require_active))
     except (AccessDenied,ValueError) as e: raise HTTPException(403,str(e))
     # Phase 02 stub: real Hermes invocation is wired in the next phase.
     reply=f"[stub:{ctx.department}] received '{req.message}' for {ctx.username}; Hermes invocation pending."
+    store.add_audit_event("agent_chat",user_id=user.id,actor=user.email,success=True,detail=f"department={ctx.department}")
     return ChatResponse(department=ctx.department,user_id=ctx.user_id,username=ctx.username,hdfs_roots=ctx.hdfs_roots,allowed_tools=ctx.allowed_tools,allowed_mcp_servers=ctx.allowed_mcp_servers,reply=reply,hermes_invoked=False)
 @app.get('/resources/{department}',response_model=ResourceListResponse)
 def list_resources(department:str,path:str|None=None,user:User=Depends(require_active)):
@@ -89,4 +93,4 @@ def check(path:str,department:str|None=None,user:User=Depends(require_active)):
     return _hdfs_check(user,path,department)
 @app.get('/admin/approvals/pending',response_model=list[PendingApproval])
 def pending_approvals(_:User=Depends(require_admin)):
-    return [PendingApproval(user_id=u.id,email=u.email,username=u.username,departments=u.departments,status=u.status) for u in store.users.values() if u.status==UserStatus.pending]
+    return [PendingApproval(user_id=u.id,email=u.email,username=u.username,departments=u.departments,status=u.status) for u in store.list_pending()]

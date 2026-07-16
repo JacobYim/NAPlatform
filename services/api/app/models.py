@@ -1,3 +1,4 @@
+from datetime import datetime
 from enum import Enum
 from pydantic import BaseModel, EmailStr, Field
 DEPARTMENTS={"ER","IT","EHS","QC"}
@@ -25,3 +26,5 @@ class HdfsCheckRequest(BaseModel):
     path:str; department:str|None=None
 class PendingApproval(BaseModel):
     user_id:str; email:EmailStr; username:str; departments:list[str]; status:UserStatus=UserStatus.pending
+class AuditEvent(BaseModel):
+    id:int; action:str; user_id:str|None=None; actor:str|None=None; success:bool=True; detail:str|None=None; created_at:datetime
