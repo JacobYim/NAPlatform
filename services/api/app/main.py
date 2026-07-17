@@ -1,9 +1,11 @@
 import os
 from uuid import uuid4
-from fastapi import Depends, FastAPI, Header, HTTPException
-from .models import AgentContext, AdminUserUpdate, AuditEvent, ChatRequest, ChatResponse, CoreWebUILaunchConfig, HdfsCheckRequest, HdfsProvisionReport, LoginRequest, PendingApproval, ResourceListResponse, SessionBootstrapResponse, SignupRequest, User, UserStatus, WorkspaceHdfsResponse
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from .models import AgentContext, AdminUserUpdate, AuditEvent, ChatRequest, ChatResponse, CoreWebUILaunchConfig, GraphNode, GraphNodeInsertRequest, GraphNodeInsertResponse, GraphNodeSearchRequest, GraphNodeSearchResponse, HdfsCheckRequest, HdfsProvisionReport, LoginRequest, PendingApproval, ResourceListResponse, SessionBootstrapResponse, SignupRequest, User, UserStatus, VectorInsertRequest, VectorInsertResponse, VectorRecord, VectorSearchRequest, VectorSearchResponse, WorkspaceHdfsResponse
 from .hdfs import HdfsProvisioner, ProvisioningError
 from .rbac import AccessDenied, allowed_hdfs_roots, allowed_mcp_servers, allowed_tools, assert_hdfs_path_allowed, neo4j_filter, normalize_department, qdrant_filter
+from .vector import VectorScopeError, vector_adapter
+from .graph import GraphScopeError, graph_adapter
 from .security import hash_password, verify_password
 from .store import store
 app=FastAPI(title="NAPlatform API",version="0.1.0"); store.seed_admin(password=os.environ.get("ADMIN_PASSWORD","ChangeMe123!"))
@@ -110,3 +112,63 @@ def workspace_hdfs(user:User=Depends(require_active)):
     except (ProvisioningError,ValueError) as e: raise HTTPException(400,str(e))
     store.add_audit_event("workspace_view",user_id=user.id,actor=user.email,success=True,detail=f"hdfs status={resp.provisioning_status}")
     return resp
+# --- Phase 05: Qdrant vector scope adapter -------------------------------
+@app.post('/vector/{department}/records',response_model=VectorInsertResponse,status_code=201)
+def vector_insert(department:str,req:VectorInsertRequest,user:User=Depends(require_active)):
+    try: dep=normalize_department(department)
+    except ValueError as e: raise HTTPException(400,str(e))
+    try: rec=vector_adapter.insert(user,dep,req.collection,req.payload,req.scope,record_id=req.id)
+    except AccessDenied as e:
+        store.add_audit_event("vector_insert",user_id=user.id,actor=user.email,success=False,detail=str(e)); raise HTTPException(403,str(e))
+    except (VectorScopeError,ValueError) as e:
+        store.add_audit_event("vector_insert",user_id=user.id,actor=user.email,success=False,detail=str(e)); raise HTTPException(400,str(e))
+    store.add_audit_event("vector_insert",user_id=user.id,actor=user.email,success=True,detail=f"department={dep} collection={req.collection} scope={req.scope}")
+    return VectorInsertResponse(department=dep,collection=req.collection,record=VectorRecord(**rec))
+def _vector_search(user:User,department:str,collection:str,query:str|None,limit:int)->VectorSearchResponse:
+    try: dep=normalize_department(department)
+    except ValueError as e: raise HTTPException(400,str(e))
+    try:
+        filt=vector_adapter.build_filter(user,dep)
+        results=vector_adapter.search(user,dep,collection,query=query,limit=limit)
+    except AccessDenied as e:
+        store.add_audit_event("vector_search",user_id=user.id,actor=user.email,success=False,detail=str(e)); raise HTTPException(403,str(e))
+    except (VectorScopeError,ValueError) as e:
+        store.add_audit_event("vector_search",user_id=user.id,actor=user.email,success=False,detail=str(e)); raise HTTPException(400,str(e))
+    store.add_audit_event("vector_search",user_id=user.id,actor=user.email,success=True,detail=f"department={dep} collection={collection} hits={len(results)}")
+    return VectorSearchResponse(department=dep,collection=collection,filter=filt,count=len(results),results=[VectorRecord(**r) for r in results])
+@app.post('/vector/{department}/search',response_model=VectorSearchResponse)
+def vector_search_post(department:str,req:VectorSearchRequest,user:User=Depends(require_active)):
+    return _vector_search(user,department,req.collection,req.query,req.limit)
+@app.get('/vector/{department}/search',response_model=VectorSearchResponse)
+def vector_search_get(department:str,collection:str,query:str|None=None,limit:int=Query(default=10,ge=0,le=1000),user:User=Depends(require_active)):
+    return _vector_search(user,department,collection,query,limit)
+# --- Phase 05: Neo4j graph scope adapter ---------------------------------
+@app.post('/graph/{department}/nodes',response_model=GraphNodeInsertResponse,status_code=201)
+def graph_insert(department:str,req:GraphNodeInsertRequest,user:User=Depends(require_active)):
+    try: dep=normalize_department(department)
+    except ValueError as e: raise HTTPException(400,str(e))
+    try: node=graph_adapter.insert_node(user,dep,req.label,req.properties,req.scope,node_id=req.id)
+    except AccessDenied as e:
+        store.add_audit_event("graph_insert",user_id=user.id,actor=user.email,success=False,detail=str(e)); raise HTTPException(403,str(e))
+    except (GraphScopeError,ValueError) as e:
+        store.add_audit_event("graph_insert",user_id=user.id,actor=user.email,success=False,detail=str(e)); raise HTTPException(400,str(e))
+    store.add_audit_event("graph_insert",user_id=user.id,actor=user.email,success=True,detail=f"department={dep} label={req.label} scope={req.scope}")
+    return GraphNodeInsertResponse(department=dep,label=req.label,node=GraphNode(**node))
+def _graph_search(user:User,department:str,label:str,query:str|None,limit:int)->GraphNodeSearchResponse:
+    try: dep=normalize_department(department)
+    except ValueError as e: raise HTTPException(400,str(e))
+    try:
+        desc=graph_adapter.build_node_match(user,dep,label)
+        results=graph_adapter.search_nodes(user,dep,label,query=query,limit=limit)
+    except AccessDenied as e:
+        store.add_audit_event("graph_search",user_id=user.id,actor=user.email,success=False,detail=str(e)); raise HTTPException(403,str(e))
+    except (GraphScopeError,ValueError) as e:
+        store.add_audit_event("graph_search",user_id=user.id,actor=user.email,success=False,detail=str(e)); raise HTTPException(400,str(e))
+    store.add_audit_event("graph_search",user_id=user.id,actor=user.email,success=True,detail=f"department={dep} label={label} hits={len(results)}")
+    return GraphNodeSearchResponse(department=dep,label=label,cypher=desc["cypher"],params=desc["params"],count=len(results),results=[GraphNode(**n) for n in results])
+@app.post('/graph/{department}/nodes/search',response_model=GraphNodeSearchResponse)
+def graph_search_post(department:str,req:GraphNodeSearchRequest,user:User=Depends(require_active)):
+    return _graph_search(user,department,req.label,req.query,req.limit)
+@app.get('/graph/{department}/nodes/search',response_model=GraphNodeSearchResponse)
+def graph_search_get(department:str,label:str,query:str|None=None,limit:int=Query(default=10,ge=0,le=1000),user:User=Depends(require_active)):
+    return _graph_search(user,department,label,query,limit)

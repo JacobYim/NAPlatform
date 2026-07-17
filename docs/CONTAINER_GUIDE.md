@@ -54,6 +54,34 @@ docker compose run --rm -e HDFS_PROVISIONING_ENABLED=true api \
 서비스 계정이 Kerberos principal/proxy-user와 HDFS ACL로 소유권·접근을 강제해야 하며, 위와 같은 ad-hoc
 CLI 실행 대신 kerberized NameNode에 대해 provisioning을 수행한다.
 
+## Qdrant/Neo4j scope adapters (single shared instance, metadata-filtered)
+
+Qdrant와 Neo4j는 각각 **단일 공유 서비스**로 뜨고, 부서/사용자 격리는 collection/graph를 나누는 것이
+아니라 **metadata filter**로 강제한다. API의 `VectorScopeAdapter`/`GraphScopeAdapter`는 호출자의 RBAC
+scope에서 Qdrant `Filter`와 parameterised Cypher를 만들어 personal/부서 데이터를 분리한다. 현재 Phase는
+live Qdrant/Neo4j 없이 동작하는 결정적 in-memory scaffold이며, 모든 endpoint는 active user와 부서
+membership을 검증한다.
+
+```bash
+# vector: 개인 point insert (owner_user_id stamp) 후 scoped search
+curl -s -X POST http://localhost:8080/vector/ER/records -H "Authorization: Bearer <TOKEN>" \
+  -H 'Content-Type: application/json' \
+  -d '{"collection":"notes","scope":"personal","payload":{"text":"hello"}}' | jq .
+curl -s -X POST http://localhost:8080/vector/ER/search -H "Authorization: Bearer <TOKEN>" \
+  -H 'Content-Type: application/json' -d '{"collection":"notes"}' | jq '.filter, .count'
+
+# graph: 부서 node insert 후 scoped search (생성된 Cypher/params 확인)
+curl -s -X POST http://localhost:8080/graph/ER/nodes -H "Authorization: Bearer <TOKEN>" \
+  -H 'Content-Type: application/json' \
+  -d '{"label":"Incident","scope":"department","properties":{"title":"t"}}' | jq .
+curl -s "http://localhost:8080/graph/ER/nodes/search?label=Incident" \
+  -H "Authorization: Bearer <TOKEN>" | jq '.cypher, .params'
+```
+
+Search 응답에는 실제 Qdrant filter descriptor(`filter`)와 Neo4j Cypher/params(`cypher`,`params`)가 그대로
+포함되어, 후속 Phase에서 in-memory store를 실제 `qdrant_client`/`neo4j` driver로 교체할 때 동일한
+payload를 그대로 사용할 수 있다. 부서 밖 데이터나 다른 사용자의 personal record는 절대 반환되지 않는다.
+
 ## Separate core-webui UI
 ```bash
 CORE_WEBUI_CONTEXT=../core-webui docker compose up -d ui

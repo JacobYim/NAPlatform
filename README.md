@@ -32,6 +32,21 @@ Environment: `DATABASE_URL`, `REDIS_URL`, `SESSION_TTL_SECONDS`, `ADMIN_PASSWORD
 
 Environment (Phase 04): `HDFS_PROVISIONING_ENABLED`, `HDFS_BIN`, `HDFS_DEPARTMENT_GROUP_PREFIX`.
 
+## Phase 05 — Qdrant/Neo4j scope adapters (metadata-separated, tested scaffolds)
+
+A **single shared Qdrant** and a **single shared Neo4j** back all four departments; tenants are separated by *metadata filters*, not by a collection/graph per department. Every vector point and every graph node/relationship carries scope metadata (`owner_user_id`, `allowed_users`, `department`, `allowed_departments`), and every read is constrained by a filter derived from the caller's RBAC scope — reusing the existing `rbac.qdrant_filter` / `rbac.neo4j_filter` semantics. The adapters are tested scaffolds: no live Qdrant/Neo4j is required.
+
+- **`app/vector.py` — `VectorScopeAdapter`** — builds Qdrant-compatible `Filter` descriptors for the active user's personal + department scope, validates department membership (via `qdrant_filter`), validates collection names against `^[a-z][a-z0-9_]{2,63}$`, and keeps a deterministic in-memory store. Insert requires scope `personal` or `department`: personal points stamp `owner_user_id=user.id`; department points stamp `department=<active>` and `allowed_departments=[<active>]`. Search only returns points whose metadata matches the caller (own/allowed user, or active/allowed department).
+- **`app/graph.py` — `GraphScopeAdapter`** — emits parameterised Cypher MATCH descriptors (`$owner_user_id`/`$user_id`/`$department` bound as params, never string-interpolated) enforcing `owner_user_id`/`allowed_users`/`department`/`allowed_departments`. Labels are validated against `^[A-Za-z][A-Za-z0-9_]{0,63}$` and relationship types against `^[A-Z][A-Z0-9_]{0,63}$` (they are the only identifiers that must be inlined into Cypher). Deterministic in-memory node/relationship insert+search stubs apply the same scope enforcement.
+- **Endpoints** (all require an active user + department membership):
+  - `POST /vector/{department}/records` — insert a point (`collection`, `scope`, `payload`).
+  - `GET|POST /vector/{department}/search` — scoped search; the response echoes the generated Qdrant filter descriptor.
+  - `POST /graph/{department}/nodes` — insert a node (`label`, `scope`, `properties`).
+  - `GET|POST /graph/{department}/nodes/search` — scoped search; the response echoes the generated Cypher + params.
+- **Audit** — `vector_insert`, `vector_search`, `graph_insert`, `graph_search` events are recorded.
+
+Swapping the in-memory stores for real `qdrant_client` / `neo4j` drivers is a later phase; the filter/Cypher descriptors these adapters already emit are the payloads those drivers consume.
+
 The actual post-login runtime UI is `github.com/JacobYim/core-webui`. The Compose `ui` service builds that repository and applies HMGMA branding with `BRAND_NAME=HMGMA` and the included `branding/logo.jpg` (`HMG Metaplant America`).
 
 ## Verify

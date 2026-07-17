@@ -38,3 +38,23 @@ class HdfsProvisionReport(BaseModel):
     user_id:str|None=None; username:str; enabled:bool; dry_run:bool; targets:list[HdfsDirProvision]=Field(default_factory=list)
 class WorkspaceHdfsResponse(BaseModel):
     user_id:str; username:str; personal_root:str; department_roots:list[str]; enabled:bool; dry_run:bool; provisioning_status:str; plan:list[HdfsDirProvision]=Field(default_factory=list)
+class VectorInsertRequest(BaseModel):
+    collection:str; scope:str; payload:dict=Field(default_factory=dict); id:str|None=None
+class VectorRecord(BaseModel):
+    id:str; collection:str; scope:str; payload:dict=Field(default_factory=dict); metadata:dict=Field(default_factory=dict)
+class VectorInsertResponse(BaseModel):
+    department:str; collection:str; record:VectorRecord
+class VectorSearchRequest(BaseModel):
+    collection:str; query:str|None=None; limit:int=Field(default=10, ge=0, le=1000)
+class VectorSearchResponse(BaseModel):
+    department:str; collection:str; filter:dict; count:int; results:list[VectorRecord]=Field(default_factory=list)
+class GraphNodeInsertRequest(BaseModel):
+    label:str; scope:str; properties:dict=Field(default_factory=dict); id:str|None=None
+class GraphNode(BaseModel):
+    id:str; label:str; scope:str; properties:dict=Field(default_factory=dict); metadata:dict=Field(default_factory=dict)
+class GraphNodeInsertResponse(BaseModel):
+    department:str; label:str; node:GraphNode
+class GraphNodeSearchRequest(BaseModel):
+    label:str; query:str|None=None; limit:int=Field(default=10, ge=0, le=1000)
+class GraphNodeSearchResponse(BaseModel):
+    department:str; label:str; cypher:str; params:dict; count:int; results:list[GraphNode]=Field(default_factory=list)
