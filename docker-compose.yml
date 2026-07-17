@@ -67,6 +67,15 @@ services:
       DATABASE_URL: postgresql+psycopg://nap:nap@postgres:5432/naplatform
       REDIS_URL: redis://redis:6379/0
       ADMIN_PASSWORD: ChangeMe123!
+      # Phase 06 department agent routing. Default is a deterministic dry run:
+      # set AGENT_ROUTING_ENABLED=true only once the Hermes agents serve HTTP.
+      AGENT_ROUTING_ENABLED: "false"
+      AGENT_REQUEST_TIMEOUT_SECONDS: "30"
+      AGENT_INVOKE_PATH: /chat
+      HERMES_ER_URL: http://hermes-er:8080
+      HERMES_IT_URL: http://hermes-it:8080
+      HERMES_EHS_URL: http://hermes-ehs:8080
+      HERMES_QC_URL: http://hermes-qc:8080
     ports: ["8080:8080"]
     depends_on: [postgres, redis, qdrant, neo4j]
   ui:

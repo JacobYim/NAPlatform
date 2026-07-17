@@ -134,3 +134,36 @@ collection/label 거부, invalid scope 거부, pending/비-member 거부(401/403
 Qdrant/Neo4j filter/Cypher descriptor 형태, admin의 any-department scope. 실제 `qdrant_client` /
 `neo4j` driver로 in-memory store를 교체하는 것은 후속 Phase이며, 어댑터가 이미 방출하는
 filter/Cypher descriptor가 그 driver가 소비하는 payload다.
+
+## Phase 06 — Department Hermes agent routing (scaffold)
+
+Phase 02의 결정적 stub을 실제 Hermes agent routing으로 교체했다. 핵심 설계는 **부서별로
+*설정된* endpoint로만 라우팅**하고, routing이 명시적으로 활성화됐을 때만 실제 HTTP 호출을 하며,
+그 외에는 결정적 dry-run을 반환하는 것이다. Live Hermes 없이도 테스트가 동작한다.
+
+- **`app/agent_router.py` — `DepartmentAgentRouter`** — `AgentContext`를 실제 agent 호출 payload로
+  변환한다. 부서 endpoint는 `HERMES_ER_URL`/`HERMES_IT_URL`/`HERMES_EHS_URL`/`HERMES_QC_URL`
+  (기본값은 Compose service name `http://hermes-er:8080` 등)에서 해석된다.
+- **SSRF 방지** — 부서 문자열은 `normalize_department`로 검증한 뒤에만 endpoint map을 조회하고,
+  **사용자가 넘긴 URL은 절대 사용하지 않는다.** 설정/기본 URL도 `http(s)://host` 형태인지 재검증하여
+  `file://` 같은 scheme을 차단한다.
+- **Client 추상화** — `AgentClient` 인터페이스 아래 두 구현: `HttpAgentClient`는
+  `AGENT_REQUEST_TIMEOUT_SECONDS` timeout으로 `/chat`(404면 `/invoke`로 fallback)에 JSON `POST`를
+  수행하고, `DryRunAgentClient`는 `AGENT_ROUTING_ENABLED`가 true가 아니거나 부서 URL이 없을 때의
+  fallback으로 `request_id`, `department`, `hermes_invoked=false`와 secret-free context summary를 반환한다.
+- **Invocation payload** — `message`, user identity, 전체 `AgentContext`, `allowed_tools`,
+  `allowed_mcp_servers`, `hdfs_roots`, `qdrant_filter`, `neo4j_filter`, personal `workspace_root`를
+  포함하여 agent가 API가 발급한 scope를 재유도 없이 그대로 준수하게 한다.
+- **Endpoints** — `POST /agents/{department}/chat`는 router를 통해 라우팅한다(기본 dry-run,
+  enabled+URL 설정 시에만 실제 HTTP 호출). timeout은 `504`, upstream/unreachable 오류는 `502`로
+  매핑하고 성공/실패 모두 `agent_chat`으로 audit한다. `GET /admin/agents/status`(admin 전용)는
+  부서별 routing 설정과 `enabled`/`dry_run` flag를 secret 없이 반환한다.
+- **Audit** — `agent_chat`은 성공 시 department/`hermes_invoked`/`request_id`, 실패 시
+  실패 종류(`timeout`/`upstream_error`/`routing_error`)를 기록한다.
+
+`httpx`는 lazy import이며 주입 가능한 transport로 사용하므로, enabled HTTP 경로도 live agent 없이
+`httpx.MockTransport`로 완전히 테스트된다.
+
+pytest 커버리지: dry-run payload/context, fake transport 기반 enabled HTTP client, timeout→504 /
+upstream→502 매핑, 부서 URL 검증·no-SSRF(설정된 URL만 허용, 사용자 URL 불가), admin status endpoint,
+audit 이벤트, 그리고 기존 테스트 유지.

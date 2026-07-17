@@ -19,7 +19,7 @@ class SessionBootstrapResponse(BaseModel):
 class ChatRequest(BaseModel):
     message:str=Field(min_length=1); session_id:str|None=None
 class ChatResponse(BaseModel):
-    department:str; user_id:str; username:str; hdfs_roots:list[str]; allowed_tools:list[str]; allowed_mcp_servers:list[str]; reply:str; hermes_invoked:bool=False
+    department:str; user_id:str; username:str; hdfs_roots:list[str]; allowed_tools:list[str]; allowed_mcp_servers:list[str]; reply:str; hermes_invoked:bool=False; request_id:str|None=None
 class ResourceListResponse(BaseModel):
     department:str; path:str; allowed_roots:list[str]; entries:list[str]
 class HdfsCheckRequest(BaseModel):

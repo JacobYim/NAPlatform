@@ -6,6 +6,7 @@ from .hdfs import HdfsProvisioner, ProvisioningError
 from .rbac import AccessDenied, allowed_hdfs_roots, allowed_mcp_servers, allowed_tools, assert_hdfs_path_allowed, neo4j_filter, normalize_department, qdrant_filter
 from .vector import VectorScopeError, vector_adapter
 from .graph import GraphScopeError, graph_adapter
+from .agent_router import AgentTimeout, AgentUpstreamError, AgentError, agent_router
 from .security import hash_password, verify_password
 from .store import store
 app=FastAPI(title="NAPlatform API",version="0.1.0"); store.seed_admin(password=os.environ.get("ADMIN_PASSWORD","ChangeMe123!"))
@@ -69,10 +70,21 @@ def core_webui_session(user:User=Depends(require_active)):
 def agent_chat(department:str,req:ChatRequest,user:User=Depends(require_active)):
     try: ctx=build_agent_context(user,department)
     except (AccessDenied,ValueError) as e: raise HTTPException(403,str(e))
-    # Phase 02 stub: real Hermes invocation is wired in the next phase.
-    reply=f"[stub:{ctx.department}] received '{req.message}' for {ctx.username}; Hermes invocation pending."
-    store.add_audit_event("agent_chat",user_id=user.id,actor=user.email,success=True,detail=f"department={ctx.department}")
-    return ChatResponse(department=ctx.department,user_id=ctx.user_id,username=ctx.username,hdfs_roots=ctx.hdfs_roots,allowed_tools=ctx.allowed_tools,allowed_mcp_servers=ctx.allowed_mcp_servers,reply=reply,hermes_invoked=False)
+    # Phase 06: route via DepartmentAgentRouter. Default is a deterministic
+    # dry run; a real HTTP call happens only when AGENT_ROUTING_ENABLED=true and
+    # the department has a configured URL. Timeouts/upstream errors -> 504/502.
+    try:
+        result=agent_router.invoke(user,ctx,req.message,session_id=req.session_id)
+    except AgentTimeout as e:
+        store.add_audit_event("agent_chat",user_id=user.id,actor=user.email,success=False,detail=f"department={ctx.department} timeout"); raise HTTPException(504,str(e))
+    except AgentUpstreamError as e:
+        store.add_audit_event("agent_chat",user_id=user.id,actor=user.email,success=False,detail=f"department={ctx.department} upstream_error"); raise HTTPException(502,str(e))
+    except AgentError as e:
+        store.add_audit_event("agent_chat",user_id=user.id,actor=user.email,success=False,detail=f"department={ctx.department} routing_error"); raise HTTPException(502,str(e))
+    store.add_audit_event("agent_chat",user_id=user.id,actor=user.email,success=True,detail=f"department={ctx.department} hermes_invoked={result['hermes_invoked']} request_id={result['request_id']}")
+    return ChatResponse(department=ctx.department,user_id=ctx.user_id,username=ctx.username,hdfs_roots=ctx.hdfs_roots,allowed_tools=ctx.allowed_tools,allowed_mcp_servers=ctx.allowed_mcp_servers,reply=result['reply'],hermes_invoked=result['hermes_invoked'],request_id=result['request_id'])
+@app.get('/admin/agents/status')
+def agents_status(_:User=Depends(require_admin)): return agent_router.status()
 @app.get('/resources/{department}',response_model=ResourceListResponse)
 def list_resources(department:str,path:str|None=None,user:User=Depends(require_active)):
     try:
