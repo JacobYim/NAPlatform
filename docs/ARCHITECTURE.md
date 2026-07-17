@@ -167,3 +167,36 @@ Phase 02의 결정적 stub을 실제 Hermes agent routing으로 교체했다. �
 pytest 커버리지: dry-run payload/context, fake transport 기반 enabled HTTP client, timeout→504 /
 upstream→502 매핑, 부서 URL 검증·no-SSRF(설정된 URL만 허용, 사용자 URL 불가), admin status endpoint,
 audit 이벤트, 그리고 기존 테스트 유지.
+
+## Phase 07 — Hermes agent HTTP service (scaffold)
+
+Phase 06까지 API `DepartmentAgentRouter`는 부서별 Hermes endpoint로 HTTP를 라우팅했지만, 실제로
+받아주는 서비스가 없었다(agent 컨테이너는 `tail -f`로 대기만 함). Phase 07은 각 부서 Hermes agent
+컨테이너에 실제 HTTP 서비스를 얹는다. 핵심 설계는 **API가 발급한 scope를 agent가 다시 방어적으로
+검증**하고, 실제 Hermes CLI 실행은 명시적으로 활성화됐을 때만 하며, 그 외에는 결정적 응답을
+반환하는 것이다. Live Hermes CLI 없이도 테스트가 동작한다.
+
+- **`services/hermes-agent` (package `hermes_agent`)** — 작은 FastAPI 서비스. `GET /health`,
+  `POST /chat`, `POST /invoke`를 노출한다. `DEPARTMENT`/`HERMES_PROFILE`/`API_BASE_URL`/`HDFS_NAMENODE`를
+  로드하고, startup 시 예전 `bootstrap-agent.sh`와 동일하게 profile 파일(`SOUL.md`, `config.yaml`)을
+  준비한 뒤, `DepartmentAgentRouter`가 POST하는 payload 형태(`InvokeRequest`)를 그대로 수신한다.
+- **방어적 scope 재검증 (`hermes_agent/validation.py`)** — API가 보안 경계이지만, agent는 넘겨받은
+  scope를 다시 확인한다: payload `department`가 컨테이너 `DEPARTMENT`와 일치해야 하고(불일치 시 `403`),
+  모든 `hdfs_roots`는 traversal 없이 `/naplatform` 하위로 정규화돼야 하며, 모든
+  `allowed_tools`/`allowed_mcp_servers`는 안전한 식별자(`^[a-z0-9][a-z0-9_.-]{0,63}$`)여야 한다(위반 시
+  `400`). 기본 응답은 결정적이며 `hermes_invoked=false`다.
+- **선택적 실행 (`hermes_agent/executor.py`)** — `HERMES_AGENT_EXECUTION_ENABLED=true`이면 `/chat`이 실제
+  Hermes CLI를 `subprocess.run`(argv list, `shell=False`, `HERMES_AGENT_EXECUTION_TIMEOUT_SECONDS` timeout)으로
+  구동한다. 사용자 `message`는 단일 argv 원소로 전달되어 shell 보간이 불가능하다(안전한 명령 구성).
+  기본값은 비활성이며, 테스트는 `FakeHermesRunner`로 이 경로를 검증한다(실제 CLI 없음). timeout은 `504`,
+  non-zero exit는 `502`로 매핑된다.
+- **Compose** — `hermes-*` 서비스는 host port 없이 내부 전용(`expose: ["8080"]`)으로 HTTP를 서빙하고
+  `curl /health` healthcheck를 갖는다. API의 `AGENT_ROUTING_ENABLED`는 여전히 기본 `false`이며,
+  `true`로 바꾸면(그리고 필요 시 agent에 `HERMES_AGENT_EXECUTION_ENABLED=true`) 실제 HTTP 호출로 라우팅된다.
+
+pytest 커버리지: health, chat/invoke 결정적 기본, 부서 불일치 거부(403), invalid HDFS root 거부(400),
+invalid tool/mcp 식별자 거부(400), 실행 비활성 시 runner 미호출, 실행 활성 시 fake runner 사용·timeout→504·
+non-zero→502, 안전한 argv 구성. 또한 API 측 `test_agent_service_shape.py`는 `httpx.MockTransport`로
+router payload가 서비스 `InvokeRequest` 계약과 일치하고 서비스 응답 형태를 router가 수용함을 증명한다.
+테스트는 `services/hermes-agent/tests`에 있고 API 테스트와 함께 실행된다(`pytest.ini`가 두 경로를
+`pythonpath`/`testpaths`에 등록; agent 패키지명은 API의 `app`과 충돌하지 않도록 `hermes_agent`).
