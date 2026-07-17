@@ -67,8 +67,10 @@ services:
       DATABASE_URL: postgresql+psycopg://nap:nap@postgres:5432/naplatform
       REDIS_URL: redis://redis:6379/0
       ADMIN_PASSWORD: ChangeMe123!
-      # Phase 06 department agent routing. Default is a deterministic dry run:
-      # set AGENT_ROUTING_ENABLED=true only once the Hermes agents serve HTTP.
+      # Phase 06/07 department agent routing. Default is a deterministic dry run.
+      # The hermes-* agents now serve HTTP (/health, /chat, /invoke), so this can
+      # be flipped to "true" to route real HTTP calls to them:
+      #   AGENT_ROUTING_ENABLED: "true"
       AGENT_ROUTING_ENABLED: "false"
       AGENT_REQUEST_TIMEOUT_SECONDS: "30"
       AGENT_INVOKE_PATH: /chat
@@ -98,6 +100,15 @@ services:
   hermes-er: &agent
     build: {context: ./services/hermes-agent}
     environment: {DEPARTMENT: ER, HERMES_PROFILE: ER, API_BASE_URL: 'http://api:8080', HDFS_NAMENODE: 'hdfs://hdfs-namenode:9000'}
+    # Phase 07: agents serve HTTP internally only (no host port); the API reaches
+    # them by service name. Set HERMES_AGENT_EXECUTION_ENABLED=true to drive the
+    # real Hermes CLI (disabled by default — deterministic response).
+    expose: ["8080"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     depends_on: [api, hdfs-namenode]
   hermes-it:
     <<: *agent

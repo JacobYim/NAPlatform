@@ -61,14 +61,28 @@ Swapping the in-memory stores for real `qdrant_client` / `neo4j` drivers is a la
 
 Environment (Phase 06): `AGENT_ROUTING_ENABLED` (default false), `AGENT_REQUEST_TIMEOUT_SECONDS` (default 30), `AGENT_INVOKE_PATH` (default `/chat`), `HERMES_ER_URL`, `HERMES_IT_URL`, `HERMES_EHS_URL`, `HERMES_QC_URL`.
 
+## Phase 07 — Hermes agent HTTP service (deterministic by default, no live CLI in tests)
+
+The department Hermes agent containers no longer just tail forever — each now runs a small FastAPI service (`services/hermes-agent`, package `hermes_agent`) that the API routes to. It stays a deterministic responder unless real Hermes CLI execution is explicitly enabled, so tests and offline dev never need a live Hermes.
+
+- **Service (`hermes_agent/main.py`)** — exposes `GET /health`, `POST /chat`, `POST /invoke`. It loads `DEPARTMENT`/`HERMES_PROFILE`/`API_BASE_URL`/`HDFS_NAMENODE`, prepares the profile files (`SOUL.md`, `config.yaml`) on startup exactly as the old `bootstrap-agent.sh` did, and accepts the exact payload `DepartmentAgentRouter` posts.
+- **Defensive scope re-validation (`hermes_agent/validation.py`)** — the API is the security boundary, but the agent re-checks the scope it is handed: the payload `department` must match the container's `DEPARTMENT` (else `403`); every `hdfs_roots` entry must resolve with no traversal to a path under `/naplatform`; every `allowed_tools`/`allowed_mcp_servers` entry must be a safe identifier (`^[a-z0-9][a-z0-9_.-]{0,63}$`) — otherwise `400`. The default response is deterministic with `hermes_invoked=false`.
+- **Optional execution (`hermes_agent/executor.py`)** — with `HERMES_AGENT_EXECUTION_ENABLED=true`, `/chat` drives the real Hermes CLI via `subprocess.run` (argv list, `shell=False`, timeout from `HERMES_AGENT_EXECUTION_TIMEOUT_SECONDS`). The user `message` is passed as a single argv element, never interpolated into a shell. Disabled by default; tests exercise this path with a `FakeHermesRunner` — no real CLI. A timeout maps to `504`, a non-zero exit to `502`.
+- **Compose** — `hermes-*` services serve HTTP internally only (`expose: ["8080"]`, no host port) with a `curl /health` healthcheck. The API's `AGENT_ROUTING_ENABLED` still defaults to `false`; flip it (and optionally `HERMES_AGENT_EXECUTION_ENABLED=true` on the agents) to route real HTTP calls.
+
+Environment (Phase 07): `HERMES_AGENT_EXECUTION_ENABLED` (default false), `HERMES_AGENT_EXECUTION_TIMEOUT_SECONDS` (default 60), `HERMES_BIN` (default `hermes`), plus the existing `DEPARTMENT`/`HERMES_PROFILE`/`API_BASE_URL`/`HDFS_NAMENODE`.
+
+Tests live under `services/hermes-agent/tests` and run together with the API tests (`pytest.ini` lists both on `pythonpath`/`testpaths`; the agent package is named `hermes_agent` to avoid colliding with the API's `app`). An API-side test (`test_agent_service_shape.py`) proves via `httpx.MockTransport` that the router's payload matches the service's `InvokeRequest` contract and that the router ingests the service's response shape.
+
 The actual post-login runtime UI is `github.com/JacobYim/core-webui`. The Compose `ui` service builds that repository and applies HMGMA branding with `BRAND_NAME=HMGMA` and the included `branding/logo.jpg` (`HMG Metaplant America`).
 
 ## Verify
 ```bash
 python -m pip install -r services/api/requirements-dev.txt
-pytest -q
-python -m compileall services/api/app
+pytest -q                       # runs services/api + services/hermes-agent tests
+python -m compileall services/api/app services/hermes-agent/hermes_agent
 docker compose config
+docker compose build hermes-er api
 ```
 
 Local seeded admin: `admin@example.com` / `ChangeMe123!`.

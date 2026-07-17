@@ -113,6 +113,41 @@ docker compose run --rm \
 `AGENT_INVOKE_PATH`(기본 `/chat`), `HERMES_{ER,IT,EHS,QC}_URL`. 부서 문자열은 검증 후에만 endpoint
 map을 조회하며, 사용자가 넘긴 URL은 절대 사용하지 않는다(SSRF 방지).
 
+## Hermes agent HTTP service (deterministic vs execution)
+
+각 부서 Hermes agent 컨테이너(`services/hermes-agent`, package `hermes_agent`)는 이제 `tail -f`로
+대기만 하지 않고 작은 FastAPI 서비스를 띄운다. `GET /health`, `POST /chat`, `POST /invoke`를 내부
+전용(host port 없이 `expose: ["8080"]`)으로 서빙하며, API의 `DepartmentAgentRouter`가 이 서비스로
+라우팅한다. 기본값은 **결정적 응답**(`hermes_invoked=false`)이라 실제 Hermes CLI가 없어도 동작한다.
+
+```bash
+# agent 단독 기동 후 내부 health 확인 (host port 미노출 → 컨테이너 내부에서 확인)
+docker compose up -d hermes-er
+docker compose exec hermes-er curl -fsS http://localhost:8080/health
+
+# API를 통해 라우팅 (기본 dry-run). 실제 HTTP 라우팅을 켜려면 API에 AGENT_ROUTING_ENABLED=true.
+docker compose run --rm -e AGENT_ROUTING_ENABLED=true api \
+  uvicorn app.main:app --host 0.0.0.0 --port 8080
+```
+
+agent는 API가 발급한 scope를 방어적으로 재검증한다: payload `department`가 컨테이너 `DEPARTMENT`와
+다르면 `403`, `hdfs_roots`가 `/naplatform` 밖이거나 traversal이면 `400`,
+`allowed_tools`/`allowed_mcp_servers`에 안전하지 않은 식별자가 있으면 `400`.
+
+실제 Hermes CLI를 구동하려면 agent에서 실행을 활성화한다(기본 비활성). 활성화되면 `/chat`이
+`subprocess.run`(argv list, shell 미사용, timeout)으로 CLI를 호출하며 timeout은 `504`, non-zero exit는
+`502`로 매핑된다. 사용자 `message`는 단일 argv 원소로 전달되어 shell 보간이 불가능하다.
+
+```bash
+docker compose run --rm \
+  -e HERMES_AGENT_EXECUTION_ENABLED=true \
+  -e HERMES_AGENT_EXECUTION_TIMEOUT_SECONDS=60 \
+  hermes-er
+```
+
+환경변수: `HERMES_AGENT_EXECUTION_ENABLED`(기본 false), `HERMES_AGENT_EXECUTION_TIMEOUT_SECONDS`(기본 60),
+`HERMES_BIN`(기본 `hermes`), 그리고 기존 `DEPARTMENT`/`HERMES_PROFILE`/`API_BASE_URL`/`HDFS_NAMENODE`.
+
 ## Separate core-webui UI
 ```bash
 CORE_WEBUI_CONTEXT=../core-webui docker compose up -d ui
