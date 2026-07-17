@@ -5,8 +5,8 @@ Browser -> NAPlatform login/admin API -> core-webui runtime UI
 UI/API -> FastAPI API -> Redis sessions
                    -> Postgres auth/RBAC/audit
                    -> HDFS NameNode + 3 DataNodes
-                   -> Qdrant shared vector DB
-                   -> Neo4j shared graph DB
+                   -> Qdrant shared vector DB (metadata-filtered per scope)
+                   -> Neo4j shared graph DB (metadata-filtered per scope)
                    -> Hermes ER/IT/EHS/QC agents
 ```
 
@@ -101,3 +101,36 @@ provisioning 실행 주체는 keytab으로 인증된 서비스 계정이어야 �
 pytest 커버리지: 개인/부서 명령 계획, traversal/invalid username 거부, admin만 provision 가능,
 active user는 본인 root만 조회, 비-admin provision 거부, dry-run 기본값에서 subprocess 미실행,
 그리고 audit 기록.
+
+## Phase 05 — Qdrant/Neo4j scope adapters (metadata-separated scaffold)
+
+핵심 설계 원칙: **Qdrant와 Neo4j는 각각 단일 공유 인스턴스**이며, 부서/사용자 격리는
+물리적 collection-per-tenant나 graph-per-tenant가 아니라 **metadata filter**로 이루어진다.
+모든 vector point와 graph node/relationship은 scope metadata(`owner_user_id`, `allowed_users`,
+`department`, `allowed_departments`)를 갖고, 모든 read는 호출자의 RBAC scope에서 유도된
+filter로 제한된다. 기존 `rbac.qdrant_filter` / `rbac.neo4j_filter` 규칙을 그대로 재사용한다.
+어댑터는 live Qdrant/Neo4j 없이 동작하는 **테스트된 scaffold**다.
+
+- **`app/vector.py` — `VectorScopeAdapter`** — active user의 개인+부서 scope에 대한 Qdrant `Filter`
+  descriptor를 만들고, 부서 membership을 검증(`qdrant_filter`)하며, collection 이름을
+  `^[a-z][a-z0-9_]{2,63}$`로 검증하고, 결정적인 in-memory store를 유지한다. Insert는 scope가
+  `personal` 또는 `department`여야 한다: personal point는 `owner_user_id=user.id`를, department
+  point는 `department=<active>`와 `allowed_departments=[<active>]`를 stamp한다. Search는
+  metadata가 호출자(본인/허용 사용자, 활성/허용 부서)와 일치하는 point만 반환한다.
+- **`app/graph.py` — `GraphScopeAdapter`** — `owner_user_id`/`allowed_users`/`department`/
+  `allowed_departments`를 강제하는 parameterised Cypher MATCH descriptor를 만든다
+  (`$owner_user_id`/`$user_id`/`$department`는 param으로 bind되며 문자열 보간을 하지 않는다).
+  Cypher에 반드시 inline되어야 하는 식별자인 label은 `^[A-Za-z][A-Za-z0-9_]{0,63}$`,
+  relationship type은 `^[A-Z][A-Z0-9_]{0,63}$`로 엄격히 검증한다. 결정적 in-memory
+  node/relationship insert+search stub이 동일한 scope 규칙을 적용한다.
+- **Endpoints** (모두 active user + 부서 membership 필요) — `POST /vector/{department}/records`,
+  `GET|POST /vector/{department}/search`(응답에 생성된 Qdrant filter descriptor 포함),
+  `POST /graph/{department}/nodes`, `GET|POST /graph/{department}/nodes/search`(응답에 생성된
+  Cypher + params 포함).
+- **Audit** — `vector_insert`, `vector_search`, `graph_insert`, `graph_search` 이벤트가 기록된다.
+
+pytest 커버리지: 개인/부서 insert+search 허용, cross-user/cross-department 필터링, invalid
+collection/label 거부, invalid scope 거부, pending/비-member 거부(401/403), audit 기록, 생성된
+Qdrant/Neo4j filter/Cypher descriptor 형태, admin의 any-department scope. 실제 `qdrant_client` /
+`neo4j` driver로 in-memory store를 교체하는 것은 후속 Phase이며, 어댑터가 이미 방출하는
+filter/Cypher descriptor가 그 driver가 소비하는 payload다.
