@@ -82,6 +82,37 @@ Search 응답에는 실제 Qdrant filter descriptor(`filter`)와 Neo4j Cypher/pa
 포함되어, 후속 Phase에서 in-memory store를 실제 `qdrant_client`/`neo4j` driver로 교체할 때 동일한
 payload를 그대로 사용할 수 있다. 부서 밖 데이터나 다른 사용자의 personal record는 절대 반환되지 않는다.
 
+## Department Hermes agent routing (dry-run vs enabled)
+
+API의 `DepartmentAgentRouter`는 `/agents/{department}/chat`을 부서별로 *설정된* Hermes endpoint로
+라우팅한다. 부서 endpoint는 `HERMES_ER_URL`/`HERMES_IT_URL`/`HERMES_EHS_URL`/`HERMES_QC_URL`
+(기본값은 Compose service name `http://hermes-er:8080` 등)에서 온다. 기본값은 **dry-run**이라 네트워크를
+전혀 건드리지 않고 결정적 응답(`hermes_invoked=false`, `request_id`, context summary)을 반환한다.
+
+```bash
+# Dry-run (기본): 실제 Hermes 호출 없이 결정적 응답
+curl -s -X POST http://localhost:8080/agents/ER/chat -H "Authorization: Bearer <TOKEN>" \
+  -H 'Content-Type: application/json' -d '{"message":"hello"}' | jq '.hermes_invoked, .request_id, .reply'
+
+# admin: 부서별 routing 설정과 enabled/dry_run flag 조회 (secret 없음)
+curl -s http://localhost:8080/admin/agents/status -H "Authorization: Bearer <ADMIN_TOKEN>" | jq .
+```
+
+실제 Hermes agent를 호출하려면 부서 agent가 HTTP(`/chat` 또는 `/invoke`)를 서빙해야 하고, API에서
+routing을 활성화한다. timeout은 `504`, upstream/도달 불가 오류는 `502`로 매핑된다.
+
+```bash
+docker compose run --rm \
+  -e AGENT_ROUTING_ENABLED=true \
+  -e AGENT_REQUEST_TIMEOUT_SECONDS=30 \
+  -e HERMES_ER_URL=http://hermes-er:8080 \
+  api uvicorn app.main:app --host 0.0.0.0 --port 8080
+```
+
+환경변수: `AGENT_ROUTING_ENABLED`(기본 false), `AGENT_REQUEST_TIMEOUT_SECONDS`(기본 30),
+`AGENT_INVOKE_PATH`(기본 `/chat`), `HERMES_{ER,IT,EHS,QC}_URL`. 부서 문자열은 검증 후에만 endpoint
+map을 조회하며, 사용자가 넘긴 URL은 절대 사용하지 않는다(SSRF 방지).
+
 ## Separate core-webui UI
 ```bash
 CORE_WEBUI_CONTEXT=../core-webui docker compose up -d ui

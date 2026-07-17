@@ -47,6 +47,20 @@ A **single shared Qdrant** and a **single shared Neo4j** back all four departmen
 
 Swapping the in-memory stores for real `qdrant_client` / `neo4j` drivers is a later phase; the filter/Cypher descriptors these adapters already emit are the payloads those drivers consume.
 
+## Phase 06 — Department Hermes agent routing (dry-run by default, no live Hermes in tests)
+
+`app/agent_router.py`'s `DepartmentAgentRouter` turns an `AgentContext` into a concrete agent invocation, routing by department to a *configured* endpoint. It stays a deterministic dry run unless routing is explicitly enabled — so tests and offline dev never require a live Hermes.
+
+- **Routing** — each department resolves to an endpoint from `HERMES_ER_URL` / `HERMES_IT_URL` / `HERMES_EHS_URL` / `HERMES_QC_URL`, defaulting to the Compose service names (`http://hermes-er:8080`, …). The department key is validated (`normalize_department`) before lookup; **no user-supplied URL is ever dialed** (SSRF-safe), and every endpoint is re-validated to be an `http(s)://host` URL.
+- **Clients** — `HttpAgentClient` does an HTTP JSON `POST` to `/chat` (falling back to `/invoke` on a 404) with the timeout from `AGENT_REQUEST_TIMEOUT_SECONDS`; `DryRunAgentClient` is the fallback whenever `AGENT_ROUTING_ENABLED` is not true or a department has no URL. The dry-run response echoes `request_id`, `department`, `hermes_invoked=false`, and a secret-free context summary.
+- **Invocation payload** — carries `message`, user identity, the full `AgentContext`, `allowed_tools`, `allowed_mcp_servers`, `hdfs_roots`, `qdrant_filter`, `neo4j_filter`, and the personal `workspace_root`, so the agent honors the API-issued scope rather than re-deriving it.
+- **Endpoints** — `POST /agents/{department}/chat` now routes through the router (deterministic dry-run default; real HTTP call only when enabled + URL configured). Timeouts map to `504` and upstream/unreachable errors to `502`, and both success and failure are audited (`agent_chat`). `GET /admin/agents/status` (admin-only) returns the per-department routing config plus the `enabled`/`dry_run` flags, with no secrets.
+- **Audit** — `agent_chat` events record department, `hermes_invoked`, and `request_id` on success, and the failure kind (`timeout`/`upstream_error`/`routing_error`) on failure.
+
+`httpx` is imported lazily and used with an injectable transport, so the enabled HTTP path is fully tested via `httpx.MockTransport` without a live agent.
+
+Environment (Phase 06): `AGENT_ROUTING_ENABLED` (default false), `AGENT_REQUEST_TIMEOUT_SECONDS` (default 30), `AGENT_INVOKE_PATH` (default `/chat`), `HERMES_ER_URL`, `HERMES_IT_URL`, `HERMES_EHS_URL`, `HERMES_QC_URL`.
+
 The actual post-login runtime UI is `github.com/JacobYim/core-webui`. The Compose `ui` service builds that repository and applies HMGMA branding with `BRAND_NAME=HMGMA` and the included `branding/logo.jpg` (`HMG Metaplant America`).
 
 ## Verify
