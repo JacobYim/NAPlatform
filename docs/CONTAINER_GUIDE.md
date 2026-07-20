@@ -407,3 +407,50 @@ Phase 12 환경변수: `PRODUCTION_MODE`, `TRUSTED_ORIGINS`, `SESSION_STORE_STRI
 
 **Branch policy:** Phase 12는 `phase/12-production-hardening-release-prep`에서 작업하며 `main`은
 건드리지 않는다. `main`은 명시적 승인 후 `make release-dev-to-main`에서만 갱신된다.
+
+## Phase 13 — Docker Model Runner (공유 gemma4:31b) + PowerShell runbook
+
+모든 부서 에이전트(ER/IT/EHS/QC)가 **하나의** 모델 `gemma4:31b`를 Docker Model Runner의
+OpenAI-compatible 엔드포인트로 공유한다. 기본 스택은 여전히 dry-run(model-less)이며, 모델 러너는
+`docker-compose.model-runner.yml` override를 **명시적으로 `-f`** 로 적용할 때만 켜진다.
+
+```bash
+# 기본(dry-run) — 모델 러너 미적용, profile은 model-less (안전)
+docker compose -f docker-compose.yml config >/dev/null
+
+# 공유 gemma4:31b 모델 러너 compose config 검증(모델 러너 미설치여도 검증됨)
+make compose-config-model-runner
+docker compose -f docker-compose.yml -f docker-compose.model-runner.yml config
+
+# 공유 모델 러너 스택 기동 (로컬 Docker Model Runner 필요)
+#   Docker Desktop 4.40+에서 Model Runner 활성화 후:
+#     docker model pull gemma4:31b
+make up-model-runner
+docker compose -f docker-compose.yml -f docker-compose.model-runner.yml up -d --build
+
+# 모델 러너 스택 routing 스모크 (라이브 DMR + 에이전트 이미지의 Hermes CLI 필요)
+make smoke-model-runner
+
+# 공유 모델 러너 설정 확인 (admin 전용; secret 미노출 — provider/redacted URL/model/boolean만)
+curl -s http://localhost:8080/admin/agents/status -H "Authorization: Bearer <ADMIN_TOKEN>" | jq .model_runtime
+# 각 에이전트 /health 의 model_runtime 도 동일 모델(gemma4:31b)을 보고(부서별 persona는 격리)
+```
+
+동작 요약:
+- `HERMES_AGENT_EXECUTION_ENABLED=true` **그리고** LLM provider/model 환경변수가 설정되면, 각
+  에이전트의 생성 profile `config.yaml`에 공유 `llm:` 블록(provider/base_url/model=gemma4:31b)이
+  추가된다. 부서별 `SOUL.md` persona는 격리되고 모델은 4개 에이전트가 동일(drift 없음).
+- LLM 환경변수가 없으면 profile은 model-less → 기본 dry-run 안전.
+- API 키는 env-var **이름**(`api_key_env`)으로만 참조되며 값은 디스크에 기록/노출되지 않는다.
+- 실제 모델 응답은 로컬 Docker Desktop/Model Runner 지원과 에이전트 이미지의 Hermes CLI에 의존한다
+  (본 단계는 스캐폴드; 모델명/엔드포인트는 요청대로 gemma4:31b로 정확히 배선).
+
+Phase 13 환경변수: `HERMES_LLM_PROVIDER`, `DOCKER_MODEL_RUNNER_BASE_URL`,
+`DOCKER_MODEL_RUNNER_MODEL`(기본 `gemma4:31b`), OpenAI-compatible fallback
+`OPENAI_BASE_URL` / `OPENAI_MODEL` / `OPENAI_API_KEY`.
+
+Windows PowerShell 실행 절차(클론 → dev 체크아웃 → release-check 대체 → 스택 실행 → 스모크 →
+정리)는 `docs/POWERSHELL_RUNBOOK.md` 참고(PowerShell 문법; Git Bash와의 차이 주석 포함).
+
+**Branch policy:** Phase 13은 `phase/13-docker-model-runner-gemma4-powershell`에서 작업하며 `main`은
+건드리지 않는다(stable). `main`은 명시적 승인 후 `make release-dev-to-main`에서만 갱신된다.

@@ -259,6 +259,54 @@ curl -s localhost:8080/admin/release/readiness -H "Authorization: Bearer $ADMIN_
 approval — see `docs/FINAL_RELEASE_CHECKLIST.md`. Phase 12 is implemented on
 `phase/12-production-hardening-release-prep` and **leaves `main` unchanged**.
 
+## Phase 13 — Docker Model Runner (shared gemma4:31b for all agents) + PowerShell runbook
+
+Phase 13 lets **every** department Hermes agent (ER / IT / EHS / QC) share **one**
+model — `gemma4:31b` — served by [Docker Model Runner](https://docs.docker.com/desktop/features/model-runner/)
+over an OpenAI-compatible endpoint, **without changing the safe default**. The
+default stack stays dry-run; the model runner is a separate, explicitly-applied
+Compose override.
+
+- **Compose override (`docker-compose.model-runner.yml`)** — applied only with an
+  explicit `-f`, it enables API routing + agent execution and declares the shared
+  LLM envs (`HERMES_LLM_PROVIDER`, `DOCKER_MODEL_RUNNER_BASE_URL`,
+  `DOCKER_MODEL_RUNNER_MODEL=gemma4:31b`) on the API and on **all** `hermes-*`
+  services, so every agent points at the same model. Env-var defaults let
+  `docker compose config` validate even with no model runner installed.
+- **Shared model, isolated persona (`services/hermes-agent`)** — when
+  `HERMES_AGENT_EXECUTION_ENABLED=true` **and** the provider/model envs are set,
+  each agent's generated profile `config.yaml` gains an `llm:` block pointing at
+  the shared Docker Model Runner / OpenAI-compatible endpoint and model
+  (`gemma4:31b`). The per-department `SOUL.md` persona stays isolated; the model
+  is identical across all four agents (no agent-specific model drift). With the
+  envs unset the profile is model-less — dry-run safe.
+- **Secret-free status** — the agent `/health` and the admin `GET /admin/agents/status`
+  report a redacted `model_runtime` (provider, redacted base URL, model,
+  `configured`, `api_key_present`) so an operator can confirm the runner is wired
+  up without any secret leaving the process. The API key is referenced by env-var
+  **name** only — never written to the on-disk profile or echoed.
+- **Prerequisites** — actual model replies require **Docker Desktop 4.40+** with
+  the Docker Model Runner feature enabled and `docker model pull gemma4:31b`, plus
+  a Hermes CLI in the agent image. This is a scaffold: the model name/endpoint are
+  wired exactly as requested; a live reply depends on local Docker Desktop / model
+  runner support.
+
+Environment (Phase 13): `HERMES_LLM_PROVIDER`, `DOCKER_MODEL_RUNNER_BASE_URL`,
+`DOCKER_MODEL_RUNNER_MODEL` (default `gemma4:31b`), OpenAI-compatible fallbacks
+`OPENAI_BASE_URL` / `OPENAI_MODEL` / `OPENAI_API_KEY`.
+
+```bash
+make compose-config-model-runner   # validate the shared gemma4:31b Compose config (no runner needed)
+make up-model-runner               # start the stack with the shared model runner ON (needs local DMR)
+make smoke-model-runner            # routing smoke against the model-runner stack (needs local DMR)
+```
+
+Windows users: see **[docs/POWERSHELL_RUNBOOK.md](docs/POWERSHELL_RUNBOOK.md)** for
+the full clone → checkout → release-check → run → smoke → cleanup flow in native
+**PowerShell** syntax (no `make` required; a note flags where Git Bash differs).
+Phase 13 is implemented on `phase/13-docker-model-runner-gemma4-powershell` and
+**leaves `main` unchanged**.
+
 ## Verify
 ```bash
 python -m pip install -r services/api/requirements-dev.txt
@@ -266,9 +314,10 @@ pytest -q                       # runs services/api + services/hermes-agent + sm
 python -m compileall services/api/app services/hermes-agent/hermes_agent scripts
 docker compose -f docker-compose.yml config                                   # default (dry-run) stack
 docker compose -f docker-compose.yml -f docker-compose.override.routing.yml -f docker-compose.smoke.yml config
+docker compose -f docker-compose.yml -f docker-compose.model-runner.yml config   # shared gemma4:31b model runner
 docker compose -f docker-compose.yml build hermes-er api
 ```
-Or use the Makefile: `make test`, `make compile`, `make compose-config`, `make compose-config-routing`, `make build`.
+Or use the Makefile: `make test`, `make compile`, `make compose-config`, `make compose-config-routing`, `make compose-config-model-runner`, `make build`.
 
 Local seeded admin: `admin@example.com` / `ChangeMe123!`.
 

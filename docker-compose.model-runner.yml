@@ -1,0 +1,77 @@
+# Phase 13 — Docker Model Runner override (shared gemma4:31b for all agents).
+#
+# This file is NOT applied by a plain `docker compose up` (only the default
+# docker-compose.yml + an optional docker-compose.override.yml are auto-loaded).
+# It must be passed explicitly with `-f`, so the default stack stays SAFE /
+# DRY-RUN. Applying it:
+#   - points the API's routing at the agents (AGENT_ROUTING_ENABLED=true),
+#   - enables real Hermes execution on every agent
+#     (HERMES_AGENT_EXECUTION_ENABLED=true), and
+#   - declares the shared LLM / Docker Model Runner endpoint envs on the API and
+#     on ALL hermes-* agents, so every department agent uses the SAME model
+#     (gemma4:31b) via one OpenAI-compatible endpoint while keeping its own
+#     department persona/profile (SOUL.md) isolated.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.model-runner.yml up -d
+#   docker compose -f docker-compose.yml -f docker-compose.model-runner.yml config
+#
+# PREREQUISITES (actual availability depends on your local setup):
+#   - Docker Desktop 4.40+ (or Docker Engine) with the Docker Model Runner
+#     feature enabled.  Enable it and pull the model, e.g.:
+#         docker desktop enable model-runner        # or: Settings > Beta features
+#         docker model pull gemma4:31b
+#   - From inside the Compose network the OpenAI-compatible endpoint is reachable
+#     at http://model-runner.docker.internal/engines/v1 (the default below). From
+#     the host with TCP enabled it is http://localhost:12434/engines/v1.
+#   - The agent image must ship a Hermes CLI on PATH for real execution; without
+#     it, HERMES_AGENT_EXECUTION_ENABLED=true agents return an execution error
+#     rather than a model reply. This file is a scaffold: model name and endpoint
+#     are wired exactly as requested (gemma4:31b), but a live model reply requires
+#     the above to be present.  The DEFAULT stack (no override) is unaffected.
+#
+# Model name is `gemma4:31b` EXACTLY as requested. Override any value at run time,
+# e.g. DOCKER_MODEL_RUNNER_MODEL=gemma4:31b DOCKER_MODEL_RUNNER_BASE_URL=... .
+#
+# NOTE: a newer Compose additionally supports a top-level `models:` element and a
+# per-service `models:` attribute for Docker Model Runner. That is intentionally
+# NOT used here so `docker compose config` validates on older Compose too; the
+# env-var wiring below is the portable, version-safe form. Equivalent modern form:
+#
+#   models:
+#     gemma4:
+#       model: gemma4:31b
+#   services:
+#     api:
+#       models: [gemma4]
+#
+services:
+  api:
+    environment:
+      AGENT_ROUTING_ENABLED: "true"
+      HERMES_LLM_PROVIDER: docker-model-runner
+      DOCKER_MODEL_RUNNER_BASE_URL: "${DOCKER_MODEL_RUNNER_BASE_URL:-http://model-runner.docker.internal/engines/v1}"
+      DOCKER_MODEL_RUNNER_MODEL: "${DOCKER_MODEL_RUNNER_MODEL:-gemma4:31b}"
+  hermes-er:
+    environment:
+      HERMES_AGENT_EXECUTION_ENABLED: "true"
+      HERMES_LLM_PROVIDER: docker-model-runner
+      DOCKER_MODEL_RUNNER_BASE_URL: "${DOCKER_MODEL_RUNNER_BASE_URL:-http://model-runner.docker.internal/engines/v1}"
+      DOCKER_MODEL_RUNNER_MODEL: "${DOCKER_MODEL_RUNNER_MODEL:-gemma4:31b}"
+  hermes-it:
+    environment:
+      HERMES_AGENT_EXECUTION_ENABLED: "true"
+      HERMES_LLM_PROVIDER: docker-model-runner
+      DOCKER_MODEL_RUNNER_BASE_URL: "${DOCKER_MODEL_RUNNER_BASE_URL:-http://model-runner.docker.internal/engines/v1}"
+      DOCKER_MODEL_RUNNER_MODEL: "${DOCKER_MODEL_RUNNER_MODEL:-gemma4:31b}"
+  hermes-ehs:
+    environment:
+      HERMES_AGENT_EXECUTION_ENABLED: "true"
+      HERMES_LLM_PROVIDER: docker-model-runner
+      DOCKER_MODEL_RUNNER_BASE_URL: "${DOCKER_MODEL_RUNNER_BASE_URL:-http://model-runner.docker.internal/engines/v1}"
+      DOCKER_MODEL_RUNNER_MODEL: "${DOCKER_MODEL_RUNNER_MODEL:-gemma4:31b}"
+  hermes-qc:
+    environment:
+      HERMES_AGENT_EXECUTION_ENABLED: "true"
+      HERMES_LLM_PROVIDER: docker-model-runner
+      DOCKER_MODEL_RUNNER_BASE_URL: "${DOCKER_MODEL_RUNNER_BASE_URL:-http://model-runner.docker.internal/engines/v1}"
+      DOCKER_MODEL_RUNNER_MODEL: "${DOCKER_MODEL_RUNNER_MODEL:-gemma4:31b}"

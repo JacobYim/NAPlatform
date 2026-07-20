@@ -379,3 +379,40 @@ GET /admin/audit/export      (admin) ─▶ read-only audit export (filters + js
 
 Environment(Phase 12): `PRODUCTION_MODE`, `TRUSTED_ORIGINS`, `SESSION_STORE_STRICT`,
 `AUDIT_RETENTION_DAYS`, `AUDIT_RETENTION_ENFORCE`.
+
+## Phase 13 — Docker Model Runner (shared gemma4:31b) + PowerShell runbook
+
+```
+default stack (no override)  ─▶ model-less profiles; dry-run safe (model_runtime.configured=false)
+
+docker-compose.model-runner.yml (explicit -f only) ─▶ declares the shared LLM envs on
+  API + ALL hermes-* agents, enables API routing + agent execution:
+    HERMES_LLM_PROVIDER=docker-model-runner
+    DOCKER_MODEL_RUNNER_BASE_URL=http://model-runner.docker.internal/engines/v1  (default)
+    DOCKER_MODEL_RUNNER_MODEL=gemma4:31b                                         (shared, all agents)
+
+services/hermes-agent config.resolve_model_runtime(env) ─▶ ModelRuntime(provider, base_url,
+    model, api_key_env, api_key_present); configured only when provider+base_url+model set.
+  profile.build_config_yaml(settings) ─▶ appends one shared `llm:` block when configured;
+    per-department SOUL.md persona stays isolated ⇒ SAME model gemma4:31b, NO agent drift.
+    api key referenced by env-var NAME only (api_key_env) — never written to disk.
+
+GET /health (agent)          ─▶ model_runtime {provider, redacted base_url, model, configured, api_key_present}
+GET /admin/agents/status (API, admin) ─▶ + model_runtime (secret-free, redacted URL, key as boolean)
+```
+
+- 기본 스택은 변하지 않는다: LLM 환경변수가 없으면 profile은 model-less이고 dry-run 안전.
+- `docker-compose.model-runner.yml`은 명시적 `-f`로만 적용되며, API와 **모든** `hermes-*` 에이전트에
+  동일한 모델(`gemma4:31b`)/엔드포인트를 선언한다 → 부서별 persona(SOUL.md)는 격리, 모델은 공유(drift 없음).
+- `HERMES_AGENT_EXECUTION_ENABLED=true` **그리고** provider/model 환경변수가 설정된 경우에만 profile
+  `config.yaml`에 OpenAI-compatible `llm:` 블록이 추가된다. API 키는 env-var **이름**으로만 참조(값은
+  디스크에 기록하지 않음)하고, 상태는 booleans + redacted URL만 노출한다.
+- Docker Model Runner 실제 사용은 Docker Desktop 4.40+의 Model Runner 기능 활성화와
+  `docker model pull gemma4:31b`, 그리고 에이전트 이미지의 Hermes CLI에 의존한다(로컬 지원 사항).
+- Windows PowerShell 실행 절차는 `docs/POWERSHELL_RUNBOOK.md`(Git Bash와의 차이 주석 포함).
+- `main`은 안정 baseline: Phase 13은 `phase/13-docker-model-runner-gemma4-powershell`에서 작업하며
+  `main`은 그대로 둔다(stable).
+
+Environment(Phase 13): `HERMES_LLM_PROVIDER`, `DOCKER_MODEL_RUNNER_BASE_URL`,
+`DOCKER_MODEL_RUNNER_MODEL` (기본 `gemma4:31b`), OpenAI-compatible fallback
+`OPENAI_BASE_URL` / `OPENAI_MODEL` / `OPENAI_API_KEY`.

@@ -155,6 +155,9 @@ def build_app(settings: Settings | None = None, *, runner: HermesRunner | None =
             "profile": settings.profile,
             "execution_enabled": settings.execution_enabled,
             "profile_ready": app.state.profile_dir is not None,
+            # Phase 13: shared model runtime (secret-free); shows whether this
+            # agent is pointed at the Docker Model Runner / OpenAI-compatible model.
+            "model_runtime": settings.model_runtime.status(),
         }
 
     @app.post("/chat")

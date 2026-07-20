@@ -74,6 +74,42 @@ def trusted_origins() -> list[str]:
     return [o.strip() for o in raw.split(",") if o.strip()]
 
 
+# Phase 13: provider labels that all mean "Docker Model Runner".
+_DMR_PROVIDER_ALIASES = ("docker-model-runner", "docker_model_runner",
+                         "model-runner", "modelrunner", "dmr")
+
+
+def model_runtime_status() -> dict:
+    """Redacted view of the shared LLM / Docker Model Runner config (secret-free).
+
+    All department Hermes agents share one model via the same envs
+    (``HERMES_LLM_PROVIDER``/``DOCKER_MODEL_RUNNER_BASE_URL``/
+    ``DOCKER_MODEL_RUNNER_MODEL`` — OpenAI-compatible fallbacks accepted). This
+    lets an admin confirm the model runner is configured without any secret
+    leaving the process: the base URL is redacted (userinfo/query stripped) and
+    the API key is reported only as a boolean. ``configured`` is true only when a
+    provider, base URL, and model are all present; the default stack (none set)
+    reports ``configured=false`` and stays dry-run safe.
+    """
+    provider = (os.environ.get("HERMES_LLM_PROVIDER")
+                or os.environ.get("LLM_PROVIDER") or "").strip().lower()
+    if provider in _DMR_PROVIDER_ALIASES:
+        provider = "docker-model-runner"
+    base_url = (os.environ.get("DOCKER_MODEL_RUNNER_BASE_URL")
+                or os.environ.get("OPENAI_BASE_URL") or "").strip()
+    model = (os.environ.get("DOCKER_MODEL_RUNNER_MODEL")
+             or os.environ.get("OPENAI_MODEL") or "").strip()
+    api_key_present = bool((os.environ.get("OPENAI_API_KEY") or "").strip())
+    return {
+        "provider": provider or None,
+        "configured": bool(provider and base_url and model),
+        "base_url": _redact_url(base_url) or None,
+        "model": model or None,
+        "openai_compatible": True,
+        "api_key_present": api_key_present,
+    }
+
+
 def retention_policy() -> dict:
     """Audit retention policy — documented, non-destructive by default."""
     try:
