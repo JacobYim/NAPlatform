@@ -434,7 +434,9 @@ flow the platform requires:
 Recommended local UI run:
 
 ```bash
-UI_HOST_PORT=3001 CORE_WEBUI_CONTEXT=../core-webui docker compose up -d --build ui
+cd ../core-webui && git checkout phase/naplatform-email-register-auth && git pull --ff-only
+cd ../NAPlatform
+UI_HOST_PORT=3001 docker compose up -d --build ui
 # open http://localhost:3001/login
 ```
 

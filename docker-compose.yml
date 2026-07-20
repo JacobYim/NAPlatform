@@ -135,10 +135,10 @@ services:
       - ./config/core-webui:/preseed/src:ro
       - ./config/core-webui/preseed.sh:/preseed/preseed.sh:ro
   ui:
-    # Runtime UI is JacobYim/core-webui, not a local placeholder.
-    # Override CORE_WEBUI_CONTEXT=../core-webui for local offline development.
+    # Runtime UI is the sibling JacobYim/core-webui checkout. Set
+    # CORE_WEBUI_CONTEXT to another local checkout/path if needed.
     build:
-      context: ${CORE_WEBUI_CONTEXT:-https://github.com/JacobYim/core-webui.git#phase/naplatform-email-register-auth}
+      context: ${CORE_WEBUI_CONTEXT:-../core-webui}
     environment:
       BRAND_NAME: HMGMA
       BRAND_LOGO: /apptoo/branding/logo.jpg

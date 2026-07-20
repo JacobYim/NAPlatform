@@ -9,7 +9,7 @@ SETTINGS = json.loads((REPO_ROOT / "config" / "core-webui" / "webui-settings.jso
 
 def test_compose_enables_naplatform_webui_auth_mode():
     assert "HERMES_WEBUI_AUTH_MODE: naplatform" in COMPOSE
-    assert "core-webui.git#phase/naplatform-email-register-auth" in COMPOSE
+    assert "context: ${CORE_WEBUI_CONTEXT:-../core-webui}" in COMPOSE
     assert "email + password" in COMPOSE
     assert "admin-approved active user" in COMPOSE
     assert "HERMES_WEBUI_PASSWORD:" not in COMPOSE
