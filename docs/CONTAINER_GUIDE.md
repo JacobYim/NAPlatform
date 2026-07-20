@@ -253,6 +253,55 @@ make release-dev-to-main # 릴리스 전용 — main을 갱신하는 유일한 �
 **Branch policy:** Phase 09는 `phase/09-resource-e2e-smoke`에서 작업하며 `main`은 건드리지 않는다
 (`docs/BRANCHING.md`, `docs/ROADMAP.md`).
 
+## Real Qdrant/Neo4j/HDFS 백엔드 선택 — Phase 10
+
+Phase 10은 vector/graph/HDFS 백엔드를 **동일한 scope/RBAC 계약을 유지한 채** env로 선택 가능하게 만든다.
+기본값은 memory/dry-run이라 기본 스택과 테스트는 live 백엔드가 필요 없다. 실제 드라이버 경로는 fake로
+검증한다(`services/api/tests/test_backends.py`, Docker 불필요).
+
+백엔드 선택 env(기본 memory/dry-run):
+
+| env | 값 | 기본 | 실백엔드 연결 env |
+|-----|----|------|-------------------|
+| `VECTOR_BACKEND` | `memory` \| `qdrant` | `memory` | `QDRANT_URL`, 선택적 `QDRANT_API_KEY`, `QDRANT_VECTOR_SIZE`(768), `QDRANT_DISTANCE`(Cosine) |
+| `GRAPH_BACKEND` | `memory` \| `neo4j` | `memory` | `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD` |
+| `HDFS_PROVISIONING_ENABLED` | `true` \| `false` | `false` | (Kerberos/proxy-user; 자격증명은 서비스가 보관하지 않음) |
+
+`docker-compose.yml`의 `api`는 이 값들을 기본 memory/dry-run으로 설정해 두었고, qdrant/neo4j 서비스는 이미
+Compose에 있다. 실백엔드로 전환하려면 해당 env만 바꾼다.
+
+```bash
+# 기본(memory/dry-run) — live 백엔드 불필요
+docker compose -f docker-compose.yml up -d --build
+# 활성 백엔드 mode 확인(admin 전용, URL redacted, secret 미노출)
+TOKEN=$(curl -s localhost:8080/auth/login -H 'content-type: application/json' \
+  -d '{"email":"admin@example.com","password":"ChangeMe123!"}' | python -c 'import sys,json;print(json.load(sys.stdin)["token"])')
+curl -s localhost:8080/admin/backends/status -H "Authorization: Bearer $TOKEN"
+
+# 실백엔드로 API만 전환(공유 서비스는 이미 Compose에서 기동)
+docker compose up -d qdrant neo4j hdfs-namenode hdfs-datanode-1
+VECTOR_BACKEND=qdrant QDRANT_URL=http://localhost:6333 \
+GRAPH_BACKEND=neo4j NEO4J_URI=bolt://localhost:7687 NEO4J_USER=neo4j \
+NEO4J_PASSWORD=naplatform-password \
+  uvicorn app.main:app --app-dir services/api --port 8080
+```
+
+동작 요약:
+
+- **Qdrant** — collection이 없으면 `QDRANT_VECTOR_SIZE`/`QDRANT_DISTANCE`로 on-demand 생성하고, memory
+  어댑터와 **동일한 metadata·Qdrant `Filter` descriptor**로 upsert/search한다.
+- **Neo4j** — **parameterised Cypher만** 실행하며(값은 전부 `$param` bind, inline은 검증된 label/rel-type뿐),
+  memory 어댑터와 동일한 scope 격리를 유지한다.
+- **HDFS** — `HdfsProvisioner.health()`가 상수 안전 argv(`hdfs dfs -test -d /naplatform`)로 readiness를
+  점검한다. 기본 dry-run(계획만), provisioning이 켜졌을 때만 실행한다.
+- **안전 폴백** — 잘못된 `VECTOR_BACKEND`/`GRAPH_BACKEND`나 미구성/드라이버 미설치 시 경고 로그와 함께
+  memory로 폴백하므로 API 기동이 실패하지 않는다.
+- **`GET /admin/backends/status`** — 활성 mode·redacted URL·health를 반환하며 api key/password는 boolean으로만
+  노출한다.
+
+`main` branch policy는 이전 Phase와 동일하다: Phase 10은 `phase/10-real-backend-adapters`에서 작업하고
+`main`은 릴리스 단계에서만 갱신되어 stable 상태로 남는다.
+
 ## Separate core-webui UI
 ```bash
 CORE_WEBUI_CONTEXT=../core-webui docker compose up -d ui

@@ -2,7 +2,7 @@ import os
 from uuid import uuid4
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from .models import AgentContext, AdminUserUpdate, AuditEvent, ChatRequest, ChatResponse, CoreWebUILaunchConfig, GraphNode, GraphNodeInsertRequest, GraphNodeInsertResponse, GraphNodeSearchRequest, GraphNodeSearchResponse, HdfsCheckRequest, HdfsProvisionReport, LoginRequest, PendingApproval, ResourceListResponse, SessionBootstrapResponse, SignupRequest, User, UserStatus, VectorInsertRequest, VectorInsertResponse, VectorRecord, VectorSearchRequest, VectorSearchResponse, WorkspaceHdfsResponse
-from .hdfs import HdfsProvisioner, ProvisioningError
+from .hdfs import HdfsProvisioner, ProvisioningError, backend_status as hdfs_backend_status
 from .rbac import AccessDenied, allowed_hdfs_roots, allowed_mcp_servers, allowed_tools, assert_hdfs_path_allowed, neo4j_filter, normalize_department, qdrant_filter
 from .vector import VectorScopeError, vector_adapter
 from .graph import GraphScopeError, graph_adapter
@@ -85,6 +85,12 @@ def agent_chat(department:str,req:ChatRequest,user:User=Depends(require_active))
     return ChatResponse(department=ctx.department,user_id=ctx.user_id,username=ctx.username,hdfs_roots=ctx.hdfs_roots,allowed_tools=ctx.allowed_tools,allowed_mcp_servers=ctx.allowed_mcp_servers,reply=result['reply'],hermes_invoked=result['hermes_invoked'],request_id=result['request_id'])
 @app.get('/admin/agents/status')
 def agents_status(_:User=Depends(require_admin)): return agent_router.status()
+@app.get('/admin/backends/status')
+def backends_status(_:User=Depends(require_admin)):
+    # Admin-only view of the active vector/graph/hdfs backends. Each adapter's
+    # status() is secret-free by construction: URLs are redacted (userinfo/query
+    # stripped) and api keys / passwords are only reported as booleans.
+    return {"vector":vector_adapter.status(),"graph":graph_adapter.status(),"hdfs":hdfs_backend_status()}
 @app.get('/resources/{department}',response_model=ResourceListResponse)
 def list_resources(department:str,path:str|None=None,user:User=Depends(require_active)):
     try:

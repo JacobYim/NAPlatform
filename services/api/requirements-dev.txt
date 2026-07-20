@@ -8,3 +8,6 @@ redis==5.2.1
 psycopg[binary]==3.2.3
 pytest==8.3.4
 httpx==0.28.1
+# Phase 10 real backends (optional at runtime; tests use fakes and never a live DB).
+qdrant-client==1.12.1
+neo4j==5.27.0

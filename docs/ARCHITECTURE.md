@@ -263,3 +263,43 @@ Makefile 단계로 만들어 `main`이 실수로 갱신되지 않게 한다. 핵
 
 기본 스택은 그대로 dry-run이며 `main`은 변경하지 않는다(Phase 09는 `phase/09-resource-e2e-smoke`에서
 작업; `docs/BRANCHING.md`, `docs/ROADMAP.md`).
+
+## Phase 10 — Real Qdrant/Neo4j/HDFS backend adapters (기본 memory/dry-run)
+
+Phase 05가 in-memory scaffold로 scope 규칙을 확립했다면, Phase 10은 **동일한 scope/RBAC 계약을
+유지한 채** vector/graph/HDFS 백엔드를 env로 선택 가능한 **pluggable** 구조로 만든다. 각 백엔드의
+기본값은 memory/dry-run이라 테스트와 기본 스택은 live Qdrant/Neo4j/HDFS 없이 동작하며, 실제 드라이버
+경로는 fake client/driver/runner로 검증한다. 전체 Phase 상태는 `docs/ROADMAP.md`에 있다.
+
+```
+VECTOR_BACKEND=memory|qdrant   GRAPH_BACKEND=memory|neo4j   HDFS_PROVISIONING_ENABLED=true|false
+        │                              │                              │
+   VectorScopeAdapter(mem)        GraphScopeAdapter(mem)         HdfsProvisioner (dry-run)
+   QdrantVectorBackend  ──▶ qdrant-client   Neo4jGraphBackend ──▶ neo4j driver   health() 준비성 probe
+        (동일 Filter descriptor)        (parameterised Cypher only)     (상수 안전 argv)
+```
+
+- **백엔드 선택 env(기본 memory/dry-run)** — `VECTOR_BACKEND`, `GRAPH_BACKEND`, 기존
+  `HDFS_PROVISIONING_ENABLED`. resolver는 잘못된 값·드라이버 미설치·미구성 시 **경고 로그와 함께
+  memory로 안전 폴백**하므로, 백엔드 env 때문에 API 기동이 실패하지 않는다. 엄격 factory
+  (`build_vector_backend`/`build_graph_backend`)는 알 수 없는 mode를 거부한다.
+- **`app/vector.py` — `QdrantVectorBackend`** — 설치·구성 시 `qdrant-client` 사용(`QDRANT_URL`,
+  선택적 `QDRANT_API_KEY`). collection이 없으면 `QDRANT_VECTOR_SIZE`(기본 768)/`QDRANT_DISTANCE`
+  (기본 Cosine)로 **on-demand 생성**하고, memory 어댑터와 **동일한 metadata·Qdrant `Filter`
+  descriptor**로 upsert/search한다. 저장은 client wrapper로 위임되어 테스트가 fake를 주입한다.
+- **`app/graph.py` — `Neo4jGraphBackend`** — 설치·구성 시 `neo4j` driver 사용(`NEO4J_URI`/
+  `NEO4J_USER`/`NEO4J_PASSWORD`). **parameterised Cypher만** 실행한다 — 모든 scope 값·사용자
+  property는 `$param`으로 bind되고, inline되는 식별자는 엄격 검증된 label/relationship type뿐이다.
+- **`app/hdfs.py` — `HdfsProvisioner.health()`** — **상수 안전 argv**(`hdfs dfs -test -d /naplatform`,
+  사용자 입력·shell string 없음)로 만든 readiness probe. 기본은 dry-run(계획만, 미실행)이고,
+  provisioning이 켜졌을 때만 주입/subprocess runner로 실행한다.
+- **`GET /admin/backends/status`(admin 전용)** — 활성 vector/graph/hdfs mode, **redacted** 연결 URL,
+  dry-run/fake health를 반환한다. api key/password는 boolean(`api_key_set`/`password_set`)으로만
+  노출되어 secret이 새지 않는다.
+- **테스트** — `test_backends.py`(fake 기반): memory 기본 불변, Qdrant upsert/search/filter/collection
+  생성, Neo4j params/no-interpolation, backends status admin 전용·secret 미출력, HDFS health 계획,
+  invalid env 거부·안전 폴백. **live Qdrant/Neo4j/HDFS 불필요.**
+
+`/vector/{department}`·`/graph/{department}` API 계약은 불변이며, env가 선택한 백엔드를 사용하되
+기본은 memory다. 기본 스택은 memory/dry-run이며 `main`은 변경하지 않는다(Phase 10은
+`phase/10-real-backend-adapters`에서 작업; `docs/BRANCHING.md`, `docs/ROADMAP.md`).

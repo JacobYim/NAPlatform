@@ -1,4 +1,4 @@
-"""Phase 09: guard tests that keep the docs and Makefile in sync with the phase.
+"""Phase 09/10: guard tests that keep the docs and Makefile in sync with the phase.
 
 These are *meta* tests — they read the repository's docs and Makefile (not code)
 and assert that the explicit phase upload/release options and the current phase
@@ -114,3 +114,44 @@ def test_docs_state_main_stays_stable(rel):
     assert ("main untouched" in text or "leaves `main` unchanged" in text
             or "main은 건드리지 않는다" in text or "main 미변경" in text
             or "stable" in text)
+
+
+# --- Phase 10: real Qdrant/Neo4j/HDFS backend adapters ----------------------
+# The connection envs that select and configure the real backends. The default
+# stays memory/dry-run, so these appearing in the docs must go with that note.
+PHASE_10_BACKEND_ENVS = (
+    "VECTOR_BACKEND", "GRAPH_BACKEND", "QDRANT_URL", "QDRANT_API_KEY",
+    "NEO4J_URI", "NEO4J_USER", "NEO4J_PASSWORD",
+)
+
+
+def test_roadmap_tracks_phase_10_backends():
+    roadmap = _read("docs/ROADMAP.md")
+    assert "Phase 10" in roadmap
+    # Phase 10 is the active/in-progress backend-adapter phase on this branch.
+    assert "in progress" in roadmap.lower()
+    for env in PHASE_10_BACKEND_ENVS:
+        assert env in roadmap, f"ROADMAP missing Phase 10 backend env {env}"
+
+
+@pytest.mark.parametrize("rel", ["README.md", "docs/ARCHITECTURE.md", "docs/CONTAINER_GUIDE.md"])
+def test_docs_document_phase_10_backend_envs(rel):
+    text = _read(rel)
+    assert "Phase 10" in text, f"{rel} missing Phase 10 section"
+    for env in PHASE_10_BACKEND_ENVS:
+        assert env in text, f"{rel} missing Phase 10 backend env {env}"
+
+
+@pytest.mark.parametrize("rel", ["README.md", "docs/ROADMAP.md", "docs/CONTAINER_GUIDE.md"])
+def test_docs_document_backends_status_endpoint(rel):
+    assert "/admin/backends/status" in _read(rel), \
+        f"{rel} missing the backend status endpoint"
+
+
+@pytest.mark.parametrize("rel", ["README.md", "docs/ARCHITECTURE.md", "docs/CONTAINER_GUIDE.md"])
+def test_docs_note_memory_default_and_no_live_backend(rel):
+    text = _read(rel).lower()
+    # The default backend is memory/dry-run and needs no live Qdrant/Neo4j/HDFS.
+    assert "memory" in text
+    assert ("no live" in text or "live qdrant/neo4j/hdfs" in text
+            or "live 백엔드" in text or "live qdrant" in text)
