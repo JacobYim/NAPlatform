@@ -65,6 +65,10 @@ def test_compose_defines_ui_preseed_service(compose):
     cmd = pre.get("command")
     cmd_str = " ".join(cmd) if isinstance(cmd, list) else str(cmd)
     assert "preseed.sh" in cmd_str, "ui-preseed must run preseed.sh"
+    assert "tr -d" in cmd_str and "\r" in cmd_str, \
+        "ui-preseed must strip CRLF so Windows/Git Bash checkouts work with BusyBox sh"
+    assert "cd /preseed" in cmd_str, \
+        "ui-preseed must avoid absolute script args that MSYS rewrites on Git Bash"
 
 
 def test_compose_ui_preseed_mounts_config_and_shares_volume(compose):

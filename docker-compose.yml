@@ -107,7 +107,11 @@ services:
   ui-preseed:
     image: busybox:1.36
     restart: "no"
-    command: ["sh", "/preseed/preseed.sh"]
+    # Use a shell-relative source path instead of `sh /preseed/preseed.sh` so
+    # Windows Git Bash/MSYS does not rewrite the container path before Docker sees
+    # it. Strip CRLF at runtime because Windows checkouts may mount preseed.sh
+    # with CRLF, which BusyBox `sh` interprets as an illegal `set -eu` option.
+    command: ["sh", "-c", "cd /preseed && tr -d '\r' < preseed.sh > /tmp/preseed.sh && sh /tmp/preseed.sh"]
     environment:
       HERMES_HOME: /home/hermeswebui/.hermes
       HERMES_WEBUI_STATE_DIR: /home/hermeswebui/.hermes/webui
