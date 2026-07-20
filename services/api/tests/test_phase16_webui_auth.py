@@ -24,5 +24,7 @@ def test_preseed_declares_email_password_register_approval_contract():
     assert auth["register_enabled"] is True
     assert auth["approval_required"] is True
     assert SETTINGS["endpoints"]["register"] == "/auth/signup"
+    assert SETTINGS["endpoints"]["admin_hub"] == "/admin"
+    assert SETTINGS["endpoints"]["admin_users"] == "/api/naplatform/admin/users"
     assert SETTINGS["login_required"] is True
     assert SETTINGS["defaults"]["landing"] == "login"

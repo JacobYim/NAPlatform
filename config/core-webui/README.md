@@ -46,6 +46,20 @@ NAPlatform-auth WebUI builds cannot fall back to the old password-only gate.
 
 Seeded local admin for approvals: `admin@example.com` / `ChangeMe123!`.
 
+## Admin Hub
+
+When `POST /auth/login` reports `is_admin: true`, the WebUI redirects to
+`/admin` instead of opening chat directly. The admin hub provides:
+
+- user list with status, departments, and role;
+- pending/active/admin summary metrics;
+- editable email, username, status, departments, password, and admin role;
+- effective HDFS workspace roots for the selected user.
+
+Workspace roots are derived from NAPlatform RBAC: the personal root is
+`/naplatform/users/<username>` and shared roots are
+`/naplatform/departments/<DEPARTMENT>` for the user's departments.
+
 ## How it works (non-invasive preseed)
 
 We do **not** vendor or edit the external core-webui repo. Instead:

@@ -78,15 +78,32 @@ class Store:
     def list_pending(self) -> list[User]:
         return [u for u in self.list_users() if u.status == UserStatus.pending]
 
-    def update_user(self, user_id: str, *, status: UserStatus | None = None,
+    def update_user(self, user_id: str, *, email: str | None = None,
+                    username: str | None = None,
+                    status: UserStatus | None = None,
                     departments: list[str] | None = None,
-                    password_hash: str | None = None) -> User | None:
+                    password_hash: str | None = None,
+                    is_admin: bool | None = None) -> User | None:
         with self._Session() as s:
             row = s.get(UserRow, user_id)
             if row is None:
                 return None
+            if email is not None:
+                existing = s.scalar(select(UserRow).where(
+                    func.lower(UserRow.email) == email.lower(), UserRow.id != user_id))
+                if existing:
+                    raise ValueError("email already exists")
+                row.email = email
+            if username is not None:
+                existing = s.scalar(select(UserRow).where(
+                    UserRow.username == username, UserRow.id != user_id))
+                if existing:
+                    raise ValueError("username already exists")
+                row.username = username
             if status is not None:
                 row.status = status.value
+            if is_admin is not None:
+                row.is_admin = bool(is_admin)
             if password_hash is not None:
                 row.password_hash = password_hash
             if departments is not None:

@@ -60,6 +60,9 @@
     "logout": "/auth/logout",
     "session": "/core-webui/session",
     "session_status": "/core-webui/session/status",
+    "admin_hub": "/admin",
+    "admin_users": "/api/naplatform/admin/users",
+    "admin_user_update_template": "/api/naplatform/admin/users/{user_id}/update",
     "select_department": "/core-webui/session/select-department",
     "chat_route_template": "/agents/{department}/chat"
   },
