@@ -138,7 +138,7 @@ services:
     # Runtime UI is JacobYim/core-webui, not a local placeholder.
     # Override CORE_WEBUI_CONTEXT=../core-webui for local offline development.
     build:
-      context: ${CORE_WEBUI_CONTEXT:-https://github.com/JacobYim/core-webui.git}
+      context: ${CORE_WEBUI_CONTEXT:-https://github.com/JacobYim/core-webui.git#phase/naplatform-email-register-auth}
     environment:
       BRAND_NAME: HMGMA
       BRAND_LOGO: /apptoo/branding/logo.jpg
@@ -161,13 +161,10 @@ services:
       HERMES_WEBUI_LOGIN_REQUIRED: "true"
       HERMES_WEBUI_REQUIRE_AUTH: "true"
       HERMES_WEBUI_START_PAGE: "login"
-      # Login password for core-webui versions with a built-in password gate.
-      # Overridable via CORE_WEBUI_PASSWORD; it is NOT a real secret and NOT written
-      # into any preseed file. The documented dev-only default matches the seeded
-      # admin password (ChangeMe123!); a production deploy MUST set CORE_WEBUI_PASSWORD
-      # (and the API ADMIN_PASSWORD) to a strong value. The primary login path is the
-      # NAPlatform adapter authenticating against the API's /auth/login.
-      HERMES_WEBUI_PASSWORD: "${CORE_WEBUI_PASSWORD:-ChangeMe123!}"
+      # Phase 16: use NAPlatform API auth as the WebUI gate. The login page is
+      # email + password, registration creates a pending API account, and only an
+      # admin-approved active user receives the local WebUI cookie and reaches chat.
+      HERMES_WEBUI_AUTH_MODE: naplatform
     ports:
       # Default UI URL is http://localhost:3000. If port 3000 is already in use,
       # run with UI_HOST_PORT=3001 and open http://localhost:3001 instead.
