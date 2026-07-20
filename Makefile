@@ -14,6 +14,8 @@ COMPOSE            ?= docker compose
 BASE               := -f docker-compose.yml
 ROUTING            := -f docker-compose.override.routing.yml
 SMOKE              := -f docker-compose.smoke.yml
+# Phase 13: Docker Model Runner override (shared gemma4:31b for all agents).
+MODEL_RUNNER       := -f docker-compose.model-runner.yml
 
 # Phase upload/release variables. PHASE_BRANCH defaults to the current branch, so
 # the upload helpers operate on whatever phase you have checked out.
@@ -27,8 +29,9 @@ GIT_REMOTE         ?= origin
 RESOURCE_CMD       := python /scripts/smoke_resources_e2e.py
 
 .PHONY: help test smoke-unit compile compose-config compose-config-routing \
-        compose-config-prod build \
-        up up-routing down smoke-dry smoke-routing smoke-resources \
+        compose-config-prod compose-config-model-runner build \
+        up up-routing up-model-runner down smoke-dry smoke-routing smoke-resources \
+        smoke-model-runner \
         smoke-all-dry-run smoke-all-routing smoke-final \
         readiness release-check \
         push-phase merge-phase-to-dev release-dev-to-main
@@ -44,6 +47,7 @@ help:
 	@echo "  compose-config     - validate the default (dry-run) Compose config"
 	@echo "  compose-config-routing - validate the enabled-routing Compose config"
 	@echo "  compose-config-prod- validate Compose config against the prod env template"
+	@echo "  compose-config-model-runner - validate the Docker Model Runner (gemma4:31b) Compose config"
 	@echo "  build              - build the api and hermes-agent images"
 	@echo ""
 	@echo "Release preparation (Phase 12; never touches main):"
@@ -54,11 +58,13 @@ help:
 	@echo "Stack lifecycle:"
 	@echo "  up                 - start the default stack (dry-run, routing OFF)"
 	@echo "  up-routing         - start the stack with routing ON (override applied)"
+	@echo "  up-model-runner    - start the stack with Docker Model Runner (shared gemma4:31b) ON"
 	@echo "  down               - stop the stack and remove volumes"
 	@echo ""
 	@echo "In-cluster smoke:"
 	@echo "  smoke-dry          - routing smoke against the dry-run stack (hermes_invoked=false)"
 	@echo "  smoke-routing      - routing smoke against the enabled stack (hermes_invoked=true)"
+	@echo "  smoke-model-runner - routing smoke against the model-runner stack (needs local Docker Model Runner)"
 	@echo "  smoke-resources    - resource smoke (hdfs/vector/graph/audit scope) against the default stack"
 	@echo "  smoke-all-dry-run  - routing (dry-run) + resource smoke against the default stack"
 	@echo "  smoke-all-routing  - routing (enabled) + resource smoke against the enabled stack"
@@ -90,6 +96,11 @@ compose-config-routing:
 compose-config-prod:
 	$(COMPOSE) --env-file $(PROD_ENV_FILE) $(BASE) config
 
+# Phase 13: validate the Docker Model Runner topology (shared gemma4:31b for all
+# agents). Uses env-var defaults so it validates with no model runner installed.
+compose-config-model-runner:
+	$(COMPOSE) $(BASE) $(MODEL_RUNNER) config
+
 build:
 	$(COMPOSE) $(BASE) build api hermes-er
 
@@ -99,6 +110,12 @@ up:
 
 up-routing:
 	$(COMPOSE) $(BASE) $(ROUTING) up -d --build
+
+# Phase 13: start the stack with the shared Docker Model Runner (gemma4:31b) wired
+# to the API + every agent. Requires a working local Docker Model Runner + model
+# pull (see docker-compose.model-runner.yml); otherwise the default stack is safer.
+up-model-runner:
+	$(COMPOSE) $(BASE) $(MODEL_RUNNER) up -d --build
 
 down:
 	$(COMPOSE) $(BASE) down -v
@@ -111,6 +128,13 @@ smoke-dry:
 # Enabled: routing override applied, expect hermes_invoked=true.
 smoke-routing:
 	$(COMPOSE) $(BASE) $(ROUTING) $(SMOKE) run --rm -e SMOKE_EXPECT_ROUTING=true smoke
+
+# Phase 13: routing smoke against the Docker Model Runner stack (shared gemma4:31b).
+# Routing is ON, so hermes_invoked=true is expected. This needs a working local
+# Docker Model Runner + a Hermes CLI in the agent image for a real model reply;
+# without them the agent execution errors and the smoke fails loudly (by design).
+smoke-model-runner:
+	$(COMPOSE) $(BASE) $(MODEL_RUNNER) $(SMOKE) run --rm -e SMOKE_EXPECT_ROUTING=true smoke
 
 # --- resource E2E smoke (in-cluster) ------------------------------------
 # HDFS workspace/provisioning + vector/graph scope + cross-department denial +

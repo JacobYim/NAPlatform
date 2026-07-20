@@ -15,7 +15,7 @@ are complete** and ready for a stable release. See [BRANCHING.md](BRANCHING.md).
 - 🔄 **In progress** — active phase branch.
 - ⏳ **Upcoming** — planned, not yet started.
 
-## Phase status (through Phase 11)
+## Phase status (through Phase 13)
 
 | Phase | Title | Status |
 |------:|-------|--------|
@@ -31,9 +31,73 @@ are complete** and ready for a stable release. See [BRANCHING.md](BRANCHING.md).
 | 09 | Resource E2E smoke + explicit phase upload/release workflow | ✅ Completed |
 | 10 | Real Qdrant/Neo4j/HDFS backend adapters (memory/dry-run by default) | ✅ Completed |
 | 11 | core-webui auth/session UI integration adapter (no live UI in tests) | ✅ Completed |
-| **12** | **Production hardening & release prep (readiness validation, CORS/headers, audit export, release gate)** | 🔄 **In progress** |
+| 12 | Production hardening & release prep (readiness validation, CORS/headers, audit export, release gate) | ✅ Completed |
+| **13** | **Docker Model Runner shared gemma4:31b for all agents + PowerShell runbook** | 🔄 **In progress** |
 
-## Current phase — Phase 12 (in progress)
+## Current phase — Phase 13 (in progress)
+
+Phase 13 lets **every** department Hermes agent (ER / IT / EHS / QC) share **one**
+model — `gemma4:31b` — served by **Docker Model Runner** over an OpenAI-compatible
+endpoint, and adds a native **Windows PowerShell** runbook. Everything stays
+permissive by default: the default stack is dry-run/model-less; the model runner is
+a separate, explicitly-applied Compose override. **`main` is not touched.**
+
+Deliverables:
+
+- **Compose override (`docker-compose.model-runner.yml`)** — applied only with an
+  explicit `-f`, it enables API routing + agent execution and declares the shared
+  LLM envs (`HERMES_LLM_PROVIDER`, `DOCKER_MODEL_RUNNER_BASE_URL`,
+  `DOCKER_MODEL_RUNNER_MODEL=gemma4:31b`) on the API and on **all** `hermes-*`
+  services. Env-var defaults keep `docker compose config` valid with no runner
+  installed. The default stack (no override) is unchanged and dry-run safe.
+- **Shared model, isolated persona (`services/hermes-agent`)** —
+  `config.resolve_model_runtime()` resolves a secret-free `ModelRuntime`; when
+  `HERMES_AGENT_EXECUTION_ENABLED=true` **and** the provider/model envs are set,
+  `profile.build_config_yaml()` appends one shared `llm:` block (provider/base_url/
+  model=`gemma4:31b`) to each department's `config.yaml`. Per-department `SOUL.md`
+  persona stays isolated; the model is identical across all four agents (no
+  agent-specific model drift). Unset envs ⇒ model-less profile (dry-run safe). The
+  API key is referenced by env-var **name** only — never written to disk.
+- **Secret-free status** — agent `GET /health` and admin `GET /admin/agents/status`
+  report a redacted `model_runtime` (provider, redacted base URL, model,
+  `configured`, `api_key_present`) so an operator can confirm the runner is wired
+  without any secret leaving the process.
+- **Makefile targets** — `compose-config-model-runner`, `up-model-runner`,
+  `smoke-model-runner`. `main` still moves **only** at `release-dev-to-main`.
+- **PowerShell runbook (`docs/POWERSHELL_RUNBOOK.md`)** — clone → checkout `dev` →
+  a `make`-free release-check equivalent → run default/routing/model-runner stacks
+  → adapter UI → smoke → user-approval flow → cleanup, all in **PowerShell** syntax
+  (with a note where Git Bash differs). It explicitly does **not** run
+  `release-dev-to-main` — `main` stays untouched.
+- **Tests** — `services/hermes-agent/tests/test_model_runtime.py` (ER/IT/EHS/QC all
+  generate `gemma4:31b`/model-runner config with no drift, default stays model-less,
+  no secret leaks), `services/api/tests/test_model_runner.py` (redacted status +
+  admin-only surfacing), and `services/api/tests/test_phase13_docs.py` (doc/compose/
+  Makefile guards: runbook mentions `gemma4:31b`, `docker-compose.model-runner.yml`,
+  PowerShell syntax, and does not run `release-dev-to-main`).
+
+Prerequisites for a *live* model reply (availability depends on your local setup):
+Docker Desktop 4.40+ with the Docker Model Runner feature enabled and
+`docker model pull gemma4:31b`, plus a Hermes CLI in the agent image. This phase is
+a scaffold: the model name/endpoint are wired exactly as requested (`gemma4:31b`).
+
+### Verify Phase 13 locally
+
+```bash
+make test                          # full pytest suite (incl. model-runtime + model-runner tests)
+make compile                       # byte-compile api + hermes-agent + scripts
+make compose-config                # default (dry-run) Compose config
+make compose-config-model-runner   # shared gemma4:31b Compose config (no runner needed)
+make build                         # build the api + hermes-agent images
+```
+
+Windows: follow `docs/POWERSHELL_RUNBOOK.md` for the native PowerShell equivalents.
+
+`main` stays the stable baseline: Phase 13 is built on
+`phase/13-docker-model-runner-gemma4-powershell` and **leaves `main` unchanged**
+until the final, explicitly-approved `make release-dev-to-main`.
+
+## Previous phase — Phase 12 (complete)
 
 Phase 12 hardens the API for a real deployment and prepares the stable release to
 `main`, **without touching `main`**. Everything stays permissive by default: dev

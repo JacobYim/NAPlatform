@@ -24,6 +24,39 @@ naplatform:
     openshell: true
 """
 
+# Phase 13: appended only when a shared model runtime is configured. Every
+# department writes the *same* provider/base_url/model here (Docker Model Runner /
+# OpenAI-compatible), so all agents share one model while their SOUL.md persona
+# stays per-department. The API key is referenced by env-var NAME (``api_key_env``)
+# — never its value — so no secret is written to disk.
+LLM_CONFIG_TEMPLATE = """llm:
+  provider: "{provider}"
+  base_url: "{base_url}"
+  model: "{model}"
+  openai_compatible: {openai_compatible}
+  api_key_env: "{api_key_env}"
+"""
+
+
+def build_config_yaml(settings: Settings) -> str:
+    """Render ``config.yaml`` text, appending the LLM block when configured.
+
+    Kept as a pure function so tests can assert the generated text (shared model,
+    no per-department drift) without touching the filesystem.
+    """
+    text = CONFIG_TEMPLATE.format(department=settings.department,
+                                  api_base_url=settings.api_base_url,
+                                  hdfs_namenode=settings.hdfs_namenode)
+    mr = settings.model_runtime
+    if mr.configured:
+        text += LLM_CONFIG_TEMPLATE.format(
+            provider=mr.provider,
+            base_url=mr.base_url,
+            model=mr.model,
+            openai_compatible=str(mr.openai_compatible).lower(),
+            api_key_env=mr.api_key_env)
+    return text
+
 
 def prepare_profile(settings: Settings) -> str:
     """Create ``<HERMES_HOME>/profiles/<PROFILE>/{SOUL.md,config.yaml}``.
@@ -36,8 +69,5 @@ def prepare_profile(settings: Settings) -> str:
     (profile_dir / "SOUL.md").write_text(
         SOUL_TEMPLATE.format(department=settings.department), encoding="utf-8")
     (profile_dir / "config.yaml").write_text(
-        CONFIG_TEMPLATE.format(department=settings.department,
-                               api_base_url=settings.api_base_url,
-                               hdfs_namenode=settings.hdfs_namenode),
-        encoding="utf-8")
+        build_config_yaml(settings), encoding="utf-8")
     return str(profile_dir)

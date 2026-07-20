@@ -250,6 +250,10 @@ class DepartmentAgentRouter:
                 "configured": bool(url),
                 "source": "env" if os.environ.get(ENV_URL_KEYS[dep]) is not None else "default",
             }
+        # Phase 13: the shared model runtime (Docker Model Runner / OpenAI-compat)
+        # every department agent points at. Secret-free (redacted URL, key as a
+        # boolean); imported lazily to keep this module import light.
+        from . import config
         return {
             "enabled": self.enabled,
             "dry_run": not self.enabled,
@@ -257,6 +261,7 @@ class DepartmentAgentRouter:
             "invoke_path": self.invoke_path,
             "fallback_invoke_path": FALLBACK_INVOKE_PATH,
             "departments": departments,
+            "model_runtime": config.model_runtime_status(),
         }
 
 
