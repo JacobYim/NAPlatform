@@ -96,14 +96,16 @@ services:
       NEO4J_PASSWORD: naplatform-password
     ports: ["8080:8080"]
     depends_on: [postgres, redis, qdrant, neo4j]
-  # Phase 14: one-shot core-webui first-run preseed. This runs BEFORE `ui` starts
+  # Phase 14/15: one-shot core-webui first-run preseed. This runs BEFORE `ui` starts
   # (ui depends_on it with condition: service_completed_successfully) and shares
   # the `ui-hermes-home` volume, so it can drop the repo-controlled branding /
   # settings / setup-completed markers into the core-webui state dir. Result:
-  # http://localhost:3000 opens the workspace directly with NO first-run setup
-  # screen. It is NON-INVASIVE — it never edits the external core-webui image or
-  # its entrypoint, only seeds the shared volume it reads. Env still overrides
-  # (BRAND_NAME / BRAND_LOGO / NAPLATFORM_API_BASE_URL win over the config files).
+  # http://localhost:3000 SKIPS the first-run setup screen but then REQUIRES LOGIN
+  # (Phase 15: / redirects to /login; it does not land directly in chat). It is
+  # NON-INVASIVE — it never edits the external core-webui image or its entrypoint,
+  # only seeds the shared volume it reads. Env still overrides (BRAND_NAME /
+  # BRAND_LOGO / NAPLATFORM_API_BASE_URL / CORE_WEBUI_LOGIN_REQUIRED win over the
+  # config files). NO password is ever seeded here.
   ui-preseed:
     image: busybox:1.36
     restart: "no"
@@ -118,6 +120,11 @@ services:
       BRAND_NAME: HMGMA
       BRAND_LOGO: /apptoo/branding/logo.jpg
       NAPLATFORM_API_BASE_URL: http://api:8080
+      # Phase 15: the preseed's webui-settings.json requires login after the setup
+      # skip (login_required/require_auth/start_page=login). This env lets the repo/
+      # compose flip that gate at boot without editing the JSON. NO password here —
+      # the login password is on the `ui` service via HERMES_WEBUI_PASSWORD.
+      CORE_WEBUI_LOGIN_REQUIRED: "true"
       # Repo config is the source of truth; re-seed non-secret config each boot.
       # Set CORE_WEBUI_PRESEED_FORCE=false to preserve an existing settings.json,
       # or CORE_WEBUI_PRESEED_ENABLED=false to skip the preseed entirely.
@@ -147,6 +154,20 @@ services:
       HERMES_WEBUI_SETUP_COMPLETED: "true"
       HERMES_WEBUI_DISABLE_FIRST_RUN: "true"
       HERMES_WEBUI_SKIP_ONBOARDING: "true"
+      # Phase 15: after the setup screen is skipped the UI must REQUIRE LOGIN — it
+      # must not land directly in chat. These flags make / redirect to /login for
+      # core-webui versions that read the gate from the environment (the preseeded
+      # settings.json declares the same login_required/require_auth/start_page=login).
+      HERMES_WEBUI_LOGIN_REQUIRED: "true"
+      HERMES_WEBUI_REQUIRE_AUTH: "true"
+      HERMES_WEBUI_START_PAGE: "login"
+      # Login password for core-webui versions with a built-in password gate.
+      # Overridable via CORE_WEBUI_PASSWORD; it is NOT a real secret and NOT written
+      # into any preseed file. The documented dev-only default matches the seeded
+      # admin password (ChangeMe123!); a production deploy MUST set CORE_WEBUI_PASSWORD
+      # (and the API ADMIN_PASSWORD) to a strong value. The primary login path is the
+      # NAPlatform adapter authenticating against the API's /auth/login.
+      HERMES_WEBUI_PASSWORD: "${CORE_WEBUI_PASSWORD:-ChangeMe123!}"
     ports:
       # Default UI URL is http://localhost:3000. If port 3000 is already in use,
       # run with UI_HOST_PORT=3001 and open http://localhost:3001 instead.

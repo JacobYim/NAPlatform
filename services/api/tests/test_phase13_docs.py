@@ -16,6 +16,9 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 MODEL = "gemma4:31b"
 COMPOSE_FILE = "docker-compose.model-runner.yml"
+# Phase 15: the shared endpoint + model moved out of the compose file into a
+# repo-controlled, non-secret env file loaded via `env_file:`.
+MODEL_RUNNER_ENV_FILE = "config/model-runner/model-runner.env"
 RUNBOOK = "docs/POWERSHELL_RUNBOOK.md"
 MODEL_RUNNER_TARGETS = ("compose-config-model-runner", "up-model-runner", "smoke-model-runner")
 MODEL_ENVS = ("HERMES_LLM_PROVIDER", "DOCKER_MODEL_RUNNER_BASE_URL", "DOCKER_MODEL_RUNNER_MODEL")
@@ -27,25 +30,49 @@ def _read(rel: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
-# --- compose override -------------------------------------------------------
-def test_model_runner_compose_file_exists_and_pins_gemma():
-    text = _read(COMPOSE_FILE)
-    assert MODEL in text, f"{COMPOSE_FILE} must pin {MODEL}"
-    for env in MODEL_ENVS:
-        assert env in text, f"{COMPOSE_FILE} missing {env}"
+# --- compose override + env file (Phase 15 refactor) ------------------------
+def test_model_runner_env_file_pins_gemma_external_endpoint():
+    """Phase 15: the shared endpoint + model live in a repo-controlled env file."""
+    env_text = _read(MODEL_RUNNER_ENV_FILE)
+    assert f"DOCKER_MODEL_RUNNER_MODEL={MODEL}" in env_text, \
+        f"{MODEL_RUNNER_ENV_FILE} must pin DOCKER_MODEL_RUNNER_MODEL={MODEL}"
+    assert "DOCKER_MODEL_RUNNER_BASE_URL=" in env_text, \
+        f"{MODEL_RUNNER_ENV_FILE} must set an external DOCKER_MODEL_RUNNER_BASE_URL"
+    # No secret belongs in this editable, non-secret file.
+    low = env_text.lower()
+    for marker in ('"password"', "password=", "api_key=", "sk-", "secret="):
+        assert marker not in low, f"possible secret {marker!r} in {MODEL_RUNNER_ENV_FILE}"
 
 
-def test_model_runner_compose_covers_all_agents_and_api():
-    text = _read(COMPOSE_FILE)
-    for svc in ("api:", "hermes-er:", "hermes-it:", "hermes-ehs:", "hermes-qc:"):
-        assert svc in text, f"{COMPOSE_FILE} missing service {svc}"
-    # The shared model is declared once per service — one value, no per-agent drift.
-    occurrences = text.count(f"DOCKER_MODEL_RUNNER_MODEL:")
-    assert occurrences >= 5, "expected the shared model env on api + all four agents"
-    # Every model line uses the same gemma4:31b default (no divergent model names).
-    model_lines = [ln for ln in text.splitlines() if "DOCKER_MODEL_RUNNER_MODEL:" in ln]
-    assert model_lines and all(MODEL in ln for ln in model_lines), \
-        f"all agents must share {MODEL}: {model_lines}"
+def test_model_runner_compose_uses_env_file_and_no_embedded_service():
+    """The override loads the env file on every service, maps the host gateway, and
+    does NOT embed a model-runner service (the stack only connects to a runner)."""
+    import yaml as _yaml
+    mr = _yaml.safe_load(_read(COMPOSE_FILE))
+    services = mr.get("services") or {}
+    assert "model-runner" not in services and "model_runner" not in services, \
+        "override must not embed a model-runner service (no runner started with the stack)"
+    for svc in ("api", "hermes-er", "hermes-it", "hermes-ehs", "hermes-qc"):
+        assert svc in services, f"{COMPOSE_FILE} missing service {svc}"
+        s = services[svc]
+        env_file = s.get("env_file") or []
+        assert any(MODEL_RUNNER_ENV_FILE in str(e) for e in env_file), \
+            f"{svc} must load {MODEL_RUNNER_ENV_FILE} via env_file"
+        extra_hosts = s.get("extra_hosts") or []
+        assert any("host.docker.internal:host-gateway" in str(h) for h in extra_hosts), \
+            f"{svc} must map host.docker.internal:host-gateway"
+        assert (s.get("environment") or {}).get("HERMES_LLM_PROVIDER") == "docker-model-runner", \
+            f"{svc} must declare the shared docker-model-runner provider"
+
+
+def test_model_runner_all_agents_share_model_from_config():
+    """All agents + api share ONE gemma4:31b, sourced from the single env file
+    (no per-agent model divergence)."""
+    env_text = _read(MODEL_RUNNER_ENV_FILE)
+    model_lines = [ln for ln in env_text.splitlines()
+                   if ln.strip().startswith("DOCKER_MODEL_RUNNER_MODEL=")]
+    assert len(model_lines) == 1, "the shared model must be declared exactly once in config"
+    assert MODEL in model_lines[0], f"the single shared model must be {MODEL}"
 
 
 def test_default_compose_stays_model_less():

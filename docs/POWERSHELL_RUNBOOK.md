@@ -176,15 +176,29 @@ Invoke-RestMethod http://localhost:8080/admin/agents/status -Headers $headers | 
 
 ## 5. Run the Docker Model Runner stack (shared `gemma4:31b` for all agents)
 
-This applies `docker-compose.model-runner.yml`, which declares the shared LLM envs
-(`HERMES_LLM_PROVIDER`, `DOCKER_MODEL_RUNNER_BASE_URL`,
-`DOCKER_MODEL_RUNNER_MODEL=gemma4:31b`) on the API **and every** `hermes-*` agent, so
-all four departments (ER/IT/EHS/QC) share the **same** model while keeping their own
+This applies `docker-compose.model-runner.yml`, which declares the shared LLM provider
+(`HERMES_LLM_PROVIDER=docker-model-runner`) on the API **and every** `hermes-*` agent,
+so all four departments (ER/IT/EHS/QC) share the **same** model while keeping their own
 department persona. Requires a working local Docker Model Runner (Section 0).
 
+**Phase 15 — endpoint from a repo config file.** The shared endpoint + model no longer
+live in the compose file; they come from the non-secret, editable
+`config\model-runner\model-runner.env` (`DOCKER_MODEL_RUNNER_BASE_URL` +
+`DOCKER_MODEL_RUNNER_MODEL=gemma4:31b`), loaded via `env_file:`. The override also maps
+`host.docker.internal:host-gateway`, so the default
+`http://host.docker.internal:12434/engines/v1` reaches Docker Desktop's Model Runner
+(host TCP 12434). Two modes — edit that file to choose:
+
+- **External / host endpoint** (default) — any reachable OpenAI-compatible endpoint,
+  e.g. `http://my-inference-host:8000/engines/v1`.
+- **Docker Desktop local model runner** — internal DNS
+  `http://model-runner.docker.internal/engines/v1`.
+
+Using **no** model runner is just **not passing** `docker-compose.model-runner.yml`.
+
 ```powershell
-# Optionally override the endpoint/model (defaults shown):
-$env:DOCKER_MODEL_RUNNER_BASE_URL = "http://model-runner.docker.internal/engines/v1"
+# Edit config\model-runner\model-runner.env, or override for one run (env wins over file):
+$env:DOCKER_MODEL_RUNNER_BASE_URL = "http://host.docker.internal:12434/engines/v1"
 $env:DOCKER_MODEL_RUNNER_MODEL    = "gemma4:31b"
 
 docker compose -f docker-compose.yml -f docker-compose.model-runner.yml up -d --build
@@ -208,22 +222,31 @@ docker compose -f docker-compose.yml -f docker-compose.model-runner.yml exec her
 
 ## 6. Adapter UI (core-webui auth/session adapter)
 
-> **Phase 14 — no first-run setup screen.** The full core-webui `ui` service is
-> preconfigured from the repo (`config\core-webui\`). A one-shot `ui-preseed`
-> service seeds branding + first-run settings (`first_run: false` /
+> **Phase 14/15 — no setup screen, but login required.** The full core-webui `ui`
+> service is preconfigured from the repo (`config\core-webui\`). A one-shot
+> `ui-preseed` service seeds branding + first-run settings (`first_run: false` /
 > `setup_completed: true`) into the shared volume **before** core-webui serves, so
-> http://localhost:3000 opens straight into the HMGMA workspace — **no setup
-> screen**. Bring it up and open it:
+> http://localhost:3000 **skips the setup screen**. Phase 15 then **requires login**:
+> `/` redirects to `/login` (it no longer lands directly in chat), via
+> `login_required` / `require_auth` / `start_page=login` in the settings and the
+> matching `HERMES_WEBUI_*` env flags on `ui`.
+>
+> **Login password.** The primary login path is the NAPlatform adapter against the
+> API `POST /auth/login` (`admin@example.com` / `ChangeMe123!`). For a core-webui
+> built-in password gate, `ui` passes `HERMES_WEBUI_PASSWORD` — a **dev-only**
+> default (`ChangeMe123!`) overridable via `CORE_WEBUI_PASSWORD`, never written to a
+> preseed file. **Production must set `$env:CORE_WEBUI_PASSWORD`.**
 >
 > ```powershell
+> $env:CORE_WEBUI_PASSWORD = "a-strong-unique-password"   # production: override the dev default
 > docker compose -f docker-compose.yml up -d --build ui
-> docker compose -f docker-compose.yml logs ui-preseed   # one-shot preseed ran once
-> Start-Process "http://localhost:3000"                  # workspace, not a setup wizard
+> docker compose -f docker-compose.yml logs ui-preseed    # one-shot preseed ran once
+> Start-Process "http://localhost:3000"                   # login page, not a setup wizard
 > ```
 >
 > Edit the config or override env before bring-up — see
 > `config\core-webui\README.md` (PowerShell **and** Bash instructions). Env still
-> wins: `$env:BRAND_NAME`, `$env:NAPLATFORM_API_BASE_URL`, etc.
+> wins: `$env:BRAND_NAME`, `$env:NAPLATFORM_API_BASE_URL`, `$env:CORE_WEBUI_PASSWORD`, etc.
 
 The repo-controlled adapter is static (`services\ui\adapter\`). Point it at a running
 API and drive login/session/department-selection by hand:
@@ -382,3 +405,29 @@ netstat -ano | findstr :3000
 
 The first-run preseed still runs exactly the same; only the host URL changes.
 
+
+## Phase 15 login gate password override
+
+Phase 15 keeps the setup wizard disabled, but the UI must open `/login` before any chat screen. The WebUI password is controlled by the `CORE_WEBUI_PASSWORD` environment variable; change it before starting Docker:
+
+```powershell
+$env:CORE_WEBUI_PASSWORD = "ChangeThisDevPassword!"
+$env:CORE_WEBUI_CONTEXT = "..\core-webui"
+docker compose up -d --build ui
+```
+
+Then open the UI and sign in first:
+
+```text
+http://localhost:3000/login
+```
+
+If port 3000 is occupied, combine it with the UI port override:
+
+```powershell
+$env:UI_HOST_PORT = "3001"
+$env:CORE_WEBUI_PASSWORD = "ChangeThisDevPassword!"
+docker compose up -d --build ui
+```
+
+The password is not stored in `config/core-webui/webui-settings.json`; that file only declares login-required behavior.
