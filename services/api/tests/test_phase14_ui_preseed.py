@@ -93,6 +93,8 @@ def test_compose_ui_waits_for_preseed_completion(compose):
         "ui must wait for ui-preseed to complete successfully before serving"
     # ui still reads from the same shared volume the preseed wrote to.
     assert any(v.startswith(f"{HERMES_HOME_VOLUME}:") for v in (ui.get("volumes") or []))
+    assert any("${UI_HOST_PORT:-3000}:8787" in str(v) for v in (ui.get("ports") or [])), \
+        "ui host port must be overridable via UI_HOST_PORT when localhost:3000 is occupied"
 
 
 def test_compose_ui_carries_first_run_suppression_env(compose):
@@ -184,6 +186,14 @@ def test_runbook_mentions_preseed_and_no_setup_screen():
     runbook = _read("docs/POWERSHELL_RUNBOOK.md")
     assert "localhost:3000" in runbook
     assert PRESEED_SERVICE in runbook or "preseed" in runbook.lower()
+    assert "$env:UI_HOST_PORT" in runbook and "localhost:3001" in runbook
+
+
+def test_docs_explain_ui_port_override():
+    for rel in ("README.md", "docs/CONTAINER_GUIDE.md", f"{CONFIG_DIR}/README.md"):
+        text = _read(rel)
+        assert "UI_HOST_PORT=3001" in text, f"{rel} must document port 3000 conflict workaround"
+        assert "localhost:3001" in text
 
 
 # --- main guard remains -----------------------------------------------------
