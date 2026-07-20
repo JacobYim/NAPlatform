@@ -1,11 +1,54 @@
-# core-webui first-run preseed (Phase 14)
+# core-webui first-run preseed + login gate (Phase 14 / 15)
 
 The runtime UI is the external `github.com/JacobYim/core-webui` (white-label
 Hermes WebUI). On a fresh volume it shows an **initial setup / onboarding
 screen** at http://localhost:3000. Phase 14 suppresses that by **preconfiguring
 all required first-run settings from this repo** and applying them automatically
-when Docker brings the UI up — so the very first load opens straight into the
-HMGMA workspace, **no setup screen**.
+when Docker brings the UI up — so the very first load **skips the setup screen**.
+
+**Phase 15 — login required.** Skipping the setup screen must **not** drop the
+user straight into chat. After the setup skip the UI **requires login**: `/`
+redirects to `/login`. This is repo/compose-controlled — no code change and **no
+secret in any preseed file**:
+
+- `webui-settings.json` declares `login_required: true`, `require_auth: true`,
+  `start_page: "login"` (and `defaults.landing: "login"`), so a core-webui version
+  that reads its gate from settings shows the login page first.
+- The `ui` service in `docker-compose.yml` also sets
+  `HERMES_WEBUI_LOGIN_REQUIRED=true` / `HERMES_WEBUI_REQUIRE_AUTH=true` /
+  `HERMES_WEBUI_START_PAGE=login` as a belt-and-suspenders signal for versions that
+  read the gate from the environment.
+- `ui-preseed` carries `CORE_WEBUI_LOGIN_REQUIRED=true`; `preseed.sh` uses it to
+  flip the `login_required`/`require_auth` booleans in the copied settings at boot
+  (still **never** writing a password).
+
+## Login password (dev-only default, overridable)
+
+The **primary** login path is the NAPlatform adapter authenticating against the
+API's `POST /auth/login` — log in with the seeded admin `admin@example.com` /
+`ChangeMe123!` (or any active user). For core-webui versions that also have a
+**built-in single-password gate**, the `ui` service passes:
+
+```yaml
+HERMES_WEBUI_PASSWORD: "${CORE_WEBUI_PASSWORD:-ChangeMe123!}"
+```
+
+`CORE_WEBUI_PASSWORD` overrides it. The default `ChangeMe123!` is a **documented
+dev-only** password (the same value as the seeded API `ADMIN_PASSWORD`) and is
+**never** written into `webui-settings.json`, `branding.yaml`, or `preseed.sh` —
+only injected as a container env. **Production must override it:**
+
+```powershell
+# PowerShell
+$env:CORE_WEBUI_PASSWORD = "a-strong-unique-password"
+docker compose up -d --build ui
+```
+
+```bash
+# Bash / Git Bash
+export CORE_WEBUI_PASSWORD=a-strong-unique-password
+docker compose up -d --build ui
+```
 
 ## How it works (non-invasive preseed)
 
@@ -72,7 +115,8 @@ export NAPLATFORM_API_BASE_URL=http://api:8080
 ## Start Docker with the preseeded UI
 
 The preseed is part of the **default** `docker-compose.yml`, so a plain bring-up
-applies it automatically — **no first-run setup screen** at http://localhost:3000.
+applies it automatically — **no first-run setup screen** at http://localhost:3000,
+which then **redirects to `/login`** (Phase 15: login required).
 
 ### PowerShell (Windows)
 
@@ -84,7 +128,7 @@ docker compose up -d --build ui
 docker compose logs ui-preseed
 docker compose logs -f ui
 
-# Open the UI — it lands on the workspace, not a setup wizard
+# Open the UI — no setup wizard; it shows the login page (login required)
 Start-Process "http://localhost:3000"
 ```
 
@@ -98,7 +142,7 @@ docker compose up -d --build ui
 docker compose logs ui-preseed
 docker compose logs -f ui
 
-# Open http://localhost:3000 — it lands on the workspace, not a setup wizard
+# Open http://localhost:3000 — no setup wizard; it shows the login page (login required)
 ```
 
 To re-seed from a clean state (e.g. after changing the config), reset the volume:

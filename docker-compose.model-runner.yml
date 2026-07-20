@@ -1,77 +1,78 @@
-# Phase 13 — Docker Model Runner override (shared gemma4:31b for all agents).
+# Phase 13/15 — Docker Model Runner override (shared gemma4:31b for all agents).
 #
 # This file is NOT applied by a plain `docker compose up` (only the default
 # docker-compose.yml + an optional docker-compose.override.yml are auto-loaded).
 # It must be passed explicitly with `-f`, so the default stack stays SAFE /
-# DRY-RUN. Applying it:
+# DRY-RUN, and simply OMITTING this file means the stack uses no model runner.
+# Applying it:
 #   - points the API's routing at the agents (AGENT_ROUTING_ENABLED=true),
 #   - enables real Hermes execution on every agent
 #     (HERMES_AGENT_EXECUTION_ENABLED=true), and
-#   - declares the shared LLM / Docker Model Runner endpoint envs on the API and
-#     on ALL hermes-* agents, so every department agent uses the SAME model
-#     (gemma4:31b) via one OpenAI-compatible endpoint while keeping its own
-#     department persona/profile (SOUL.md) isolated.
+#   - wires the SAME shared LLM endpoint + model onto the API and ALL hermes-*
+#     agents so every department agent uses the SAME model (gemma4:31b) via one
+#     OpenAI-compatible endpoint, while keeping its own department persona/profile
+#     (SOUL.md) isolated.
 #
 #   docker compose -f docker-compose.yml -f docker-compose.model-runner.yml up -d
 #   docker compose -f docker-compose.yml -f docker-compose.model-runner.yml config
 #
-# PREREQUISITES (actual availability depends on your local setup):
-#   - Docker Desktop 4.40+ (or Docker Engine) with the Docker Model Runner
-#     feature enabled.  Enable it and pull the model, e.g.:
-#         docker desktop enable model-runner        # or: Settings > Beta features
-#         docker model pull gemma4:31b
-#   - From inside the Compose network the OpenAI-compatible endpoint is reachable
-#     at http://model-runner.docker.internal/engines/v1 (the default below). From
-#     the host with TCP enabled it is http://localhost:12434/engines/v1.
-#   - The agent image must ship a Hermes CLI on PATH for real execution; without
-#     it, HERMES_AGENT_EXECUTION_ENABLED=true agents return an execution error
-#     rather than a model reply. This file is a scaffold: model name and endpoint
-#     are wired exactly as requested (gemma4:31b), but a live model reply requires
-#     the above to be present.  The DEFAULT stack (no override) is unaffected.
+# Phase 15 — the endpoint + model are NO LONGER hardcoded here. They come from the
+# repo-controlled, non-secret env file `config/model-runner/model-runner.env`
+# (loaded via `env_file:` below). Edit THAT file to choose the endpoint — this
+# compose file only declares the provider, the enablement flags, the env_file, and
+# a host-gateway mapping. There is intentionally NO embedded model-runner service:
+# the stack never tries to start a model runner of its own; it only CONNECTS to one.
 #
-# Model name is `gemma4:31b` EXACTLY as requested. Override any value at run time,
-# e.g. DOCKER_MODEL_RUNNER_MODEL=gemma4:31b DOCKER_MODEL_RUNNER_BASE_URL=... .
+# Two modes (set DOCKER_MODEL_RUNNER_BASE_URL in config/model-runner/model-runner.env):
+#   1) External / host endpoint (default). `extra_hosts: host.docker.internal:
+#      host-gateway` makes the Docker host reachable as host.docker.internal from
+#      inside the containers; Docker Desktop's Model Runner listens on host TCP
+#      12434, so the default http://host.docker.internal:12434/engines/v1 reaches it
+#      even when the internal DNS name does not resolve. This is the fix for the
+#      earlier "gemma4:31b connection cannot be reached" error.
+#   2) Docker Desktop internal DNS: http://model-runner.docker.internal/engines/v1.
+#
+# Model name is `gemma4:31b` EXACTLY as requested; it lives in the env file so all
+# agents share one value with no drift. Run-time env still overrides the file, e.g.
+#   DOCKER_MODEL_RUNNER_BASE_URL=... docker compose -f ... -f ... up -d
 #
 # NOTE: a newer Compose additionally supports a top-level `models:` element and a
 # per-service `models:` attribute for Docker Model Runner. That is intentionally
 # NOT used here so `docker compose config` validates on older Compose too; the
-# env-var wiring below is the portable, version-safe form. Equivalent modern form:
+# env-file + env-var wiring below is the portable, version-safe form.
 #
-#   models:
-#     gemma4:
-#       model: gemma4:31b
-#   services:
-#     api:
-#       models: [gemma4]
-#
+x-model-runner: &model-runner
+  # Shared endpoint + model come from the repo-controlled, non-secret env file.
+  env_file:
+    - ./config/model-runner/model-runner.env
+  # Reach the Docker host (and Docker Desktop's Model Runner on TCP 12434) from
+  # inside the container network.
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+
 services:
   api:
+    <<: *model-runner
     environment:
       AGENT_ROUTING_ENABLED: "true"
       HERMES_LLM_PROVIDER: docker-model-runner
-      DOCKER_MODEL_RUNNER_BASE_URL: "${DOCKER_MODEL_RUNNER_BASE_URL:-http://model-runner.docker.internal/engines/v1}"
-      DOCKER_MODEL_RUNNER_MODEL: "${DOCKER_MODEL_RUNNER_MODEL:-gemma4:31b}"
   hermes-er:
+    <<: *model-runner
     environment:
       HERMES_AGENT_EXECUTION_ENABLED: "true"
       HERMES_LLM_PROVIDER: docker-model-runner
-      DOCKER_MODEL_RUNNER_BASE_URL: "${DOCKER_MODEL_RUNNER_BASE_URL:-http://model-runner.docker.internal/engines/v1}"
-      DOCKER_MODEL_RUNNER_MODEL: "${DOCKER_MODEL_RUNNER_MODEL:-gemma4:31b}"
   hermes-it:
+    <<: *model-runner
     environment:
       HERMES_AGENT_EXECUTION_ENABLED: "true"
       HERMES_LLM_PROVIDER: docker-model-runner
-      DOCKER_MODEL_RUNNER_BASE_URL: "${DOCKER_MODEL_RUNNER_BASE_URL:-http://model-runner.docker.internal/engines/v1}"
-      DOCKER_MODEL_RUNNER_MODEL: "${DOCKER_MODEL_RUNNER_MODEL:-gemma4:31b}"
   hermes-ehs:
+    <<: *model-runner
     environment:
       HERMES_AGENT_EXECUTION_ENABLED: "true"
       HERMES_LLM_PROVIDER: docker-model-runner
-      DOCKER_MODEL_RUNNER_BASE_URL: "${DOCKER_MODEL_RUNNER_BASE_URL:-http://model-runner.docker.internal/engines/v1}"
-      DOCKER_MODEL_RUNNER_MODEL: "${DOCKER_MODEL_RUNNER_MODEL:-gemma4:31b}"
   hermes-qc:
+    <<: *model-runner
     environment:
       HERMES_AGENT_EXECUTION_ENABLED: "true"
       HERMES_LLM_PROVIDER: docker-model-runner
-      DOCKER_MODEL_RUNNER_BASE_URL: "${DOCKER_MODEL_RUNNER_BASE_URL:-http://model-runner.docker.internal/engines/v1}"
-      DOCKER_MODEL_RUNNER_MODEL: "${DOCKER_MODEL_RUNNER_MODEL:-gemma4:31b}"

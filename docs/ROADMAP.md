@@ -15,7 +15,7 @@ are complete** and ready for a stable release. See [BRANCHING.md](BRANCHING.md).
 - 🔄 **In progress** — active phase branch.
 - ⏳ **Upcoming** — planned, not yet started.
 
-## Phase status (through Phase 14)
+## Phase status (through Phase 15)
 
 | Phase | Title | Status |
 |------:|-------|--------|
@@ -33,9 +33,56 @@ are complete** and ready for a stable release. See [BRANCHING.md](BRANCHING.md).
 | 11 | core-webui auth/session UI integration adapter (no live UI in tests) | ✅ Completed |
 | 12 | Production hardening & release prep (readiness validation, CORS/headers, audit export, release gate) | ✅ Completed |
 | 13 | Docker Model Runner shared gemma4:31b for all agents + PowerShell runbook | ✅ Completed |
-| **14** | **core-webui first-run preseed (suppress the initial setup screen via repo-controlled config)** | 🔄 **In progress** |
+| 14 | core-webui first-run preseed (suppress the initial setup screen via repo-controlled config) | ✅ Completed |
+| **15** | **Login-required UI (skip setup, then require login) + endpoint-configurable Docker Model Runner (env_file, gemma4:31b)** | 🔄 **In progress** |
 
-## Current phase — Phase 14 (in progress)
+## Current phase — Phase 15 (in progress)
+
+Phase 15 fixes two operator-reported issues on
+`phase/15-login-required-model-runner-config`, keeping the default stack dry-run-safe
+and **`main` untouched**.
+
+**A. Login-required UI.** Phase 14 skipped the setup screen but the UI then landed
+**directly in chat**. Phase 15 makes the UI **require login** after the setup skip —
+`/` redirects to `/login`. Repo/compose-controlled, **no secret in any preseed file**:
+
+- `config/core-webui/webui-settings.json` declares `login_required: true`,
+  `require_auth: true`, `start_page: "login"`, `defaults.landing: "login"`.
+- `docker-compose.yml` `ui` service carries `HERMES_WEBUI_LOGIN_REQUIRED` /
+  `HERMES_WEBUI_REQUIRE_AUTH` / `HERMES_WEBUI_START_PAGE=login`, and
+  `HERMES_WEBUI_PASSWORD: "${CORE_WEBUI_PASSWORD:-ChangeMe123!}"` — a **documented
+  dev-only** default password, overridable via `CORE_WEBUI_PASSWORD`, never written to
+  a preseed file. Production must set `CORE_WEBUI_PASSWORD`.
+- `ui-preseed` forwards `CORE_WEBUI_LOGIN_REQUIRED`; `preseed.sh` flips the login
+  flags in the copied settings without ever writing a password. The primary login
+  path is the NAPlatform adapter against the API `POST /auth/login`.
+
+**B. Endpoint-configurable Docker Model Runner.** The earlier _"Gemma4:31B connection
+cannot be reached"_ came from a hardcoded internal endpoint. Phase 15 moves the shared
+endpoint + model into a repo-controlled, **non-secret** env file
+`config/model-runner/model-runner.env` (`DOCKER_MODEL_RUNNER_BASE_URL` +
+`DOCKER_MODEL_RUNNER_MODEL=gemma4:31b`). `docker-compose.model-runner.yml` loads it via
+`env_file:` on the API **and every** `hermes-*` agent (one shared model, no drift),
+maps `host.docker.internal:host-gateway`, and embeds **no model-runner service** — the
+stack only connects to a runner, never starts one. Two modes: (1) **external** / host
+endpoint (default `http://host.docker.internal:12434/engines/v1`, i.e. Docker Desktop's
+Model Runner on host TCP 12434, or any external OpenAI-compatible box), and (2) Docker
+Desktop local model runner via the internal DNS
+`http://model-runner.docker.internal/engines/v1`. Using **no** model runner is just
+**omitting** `docker-compose.model-runner.yml` (default stays model-less).
+
+### Verify Phase 15 locally
+
+```bash
+python scripts/_phase15_check.py    # offline login + model-runner wiring check (no Docker)
+pytest -q services/api/tests/test_phase15_login_model_runner.py
+make compose-config-model-runner    # env_file-driven shared gemma4:31b config (no runner needed)
+```
+
+`main` stays the stable baseline: Phase 15 **leaves `main` unchanged** until the final,
+explicitly-approved `make release-dev-to-main`.
+
+## Previous phase — Phase 14 (complete)
 
 Phase 14 removes the **initial setup / onboarding screen** that the external
 core-webui UI shows at http://localhost:3000 on a fresh volume. It does so by

@@ -416,3 +416,29 @@ GET /admin/agents/status (API, admin) ─▶ + model_runtime (secret-free, redac
 Environment(Phase 13): `HERMES_LLM_PROVIDER`, `DOCKER_MODEL_RUNNER_BASE_URL`,
 `DOCKER_MODEL_RUNNER_MODEL` (기본 `gemma4:31b`), OpenAI-compatible fallback
 `OPENAI_BASE_URL` / `OPENAI_MODEL` / `OPENAI_API_KEY`.
+
+## Phase 14/15 — core-webui 로그인 게이트 + 엔드포인트 구성형 model runner
+
+```
+Browser ─▶ http://localhost:3000
+  ui-preseed(one-shot) ─▶ ui-hermes-home 볼륨에 branding/webui-settings/markers 시딩(서빙 전)
+  core-webui ─▶ setup 화면 SKIP(first_run:false/setup_completed:true)
+             ─▶ Phase 15: 로그인 필수 → / 는 /login 으로 리다이렉트
+                  (login_required/require_auth/start_page=login + defaults.landing=login,
+                   ui env HERMES_WEBUI_LOGIN_REQUIRED/REQUIRE_AUTH/START_PAGE)
+  로그인 경로 ─▶ naplatform-adapter ─▶ API POST /auth/login (세션 토큰, 브라우저 메모리)
+  password ─▶ HERMES_WEBUI_PASSWORD = ${CORE_WEBUI_PASSWORD:-ChangeMe123!}  (dev 전용 기본, preseed에 미기록)
+
+docker-compose.model-runner.yml (명시적 -f)
+  env_file: config/model-runner/model-runner.env  (비-secret; DOCKER_MODEL_RUNNER_BASE_URL + MODEL=gemma4:31b)
+  extra_hosts: host.docker.internal:host-gateway   (host TCP 12434의 Docker Desktop Model Runner 접근)
+  embedded model-runner 서비스 없음 → 스택은 러너에 연결만, 직접 기동하지 않음
+  모드 1) external/host 엔드포인트(기본)  모드 2) model-runner.docker.internal 내부 DNS
+  omit 하면 model runner 미사용(기본 dry-run/model-less)
+```
+
+- **로그인 필수(Phase 15):** setup는 건너뛰되 곧바로 chat이 아니라 login. 저장소/compose 제어이며
+  preseed 파일에는 secret이 없다(비밀번호는 `HERMES_WEBUI_PASSWORD`/`CORE_WEBUI_PASSWORD` env로만 주입).
+- **엔드포인트 구성형 model runner(Phase 15):** 공유 엔드포인트+모델(`gemma4:31b`)이
+  `config/model-runner/model-runner.env` 로 이동, `env_file`+`host-gateway`로 연결. 기존 "gemma4:31b
+  connection cannot be reached" 이슈 해소. `main`은 그대로 둔다(stable).

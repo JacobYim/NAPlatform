@@ -347,6 +347,73 @@ See **[config/core-webui/README.md](config/core-webui/README.md)** for editing t
 config and starting Docker in PowerShell and Bash. Phase 14 is implemented on
 `phase/14-core-webui-first-run-autoconfig` and **leaves `main` unchanged**.
 
+## Phase 15 — login-required UI + endpoint-configurable model runner
+
+Phase 15 fixes two operator-reported issues without touching `main`, and stays
+dry-run-safe by default.
+
+### A. The UI requires login (no more direct-to-chat)
+
+Phase 14 correctly **skips the setup screen**, but the UI then landed **directly in
+chat**. Phase 15 makes the UI **require login** after the setup skip — `/` redirects
+to `/login`. This is repo/compose-controlled, with **no secret in any preseed file**:
+
+- `config/core-webui/webui-settings.json` declares `login_required: true`,
+  `require_auth: true`, `start_page: "login"`, and `defaults.landing: "login"`.
+- The `ui` service in `docker-compose.yml` also carries
+  `HERMES_WEBUI_LOGIN_REQUIRED` / `HERMES_WEBUI_REQUIRE_AUTH` /
+  `HERMES_WEBUI_START_PAGE=login` (belt-and-suspenders for env-driven versions).
+- `ui-preseed` forwards `CORE_WEBUI_LOGIN_REQUIRED`, and `preseed.sh` uses it to flip
+  the login flags in the copied settings — still **never writing a password**.
+
+**Login behavior & password.** The primary login path is the NAPlatform adapter
+authenticating against the API `POST /auth/login` — sign in with the seeded admin
+`admin@example.com` / `ChangeMe123!` (or any active user). For core-webui versions
+with a built-in single-password gate, the `ui` service passes
+`HERMES_WEBUI_PASSWORD: "${CORE_WEBUI_PASSWORD:-ChangeMe123!}"`. Override it with
+`CORE_WEBUI_PASSWORD`; the default `ChangeMe123!` is a **documented dev-only** value
+(matching the seeded admin) and is never written into a preseed file. **Production
+must set `CORE_WEBUI_PASSWORD`** (and the API `ADMIN_PASSWORD`) to a strong value:
+
+```bash
+CORE_WEBUI_PASSWORD=a-strong-unique-password docker compose up -d --build ui
+```
+
+### B. Endpoint-configurable Docker Model Runner (gemma4:31b reachable)
+
+The earlier _"Gemma4:31B connection cannot be reached"_ failure came from a
+hardcoded internal endpoint. Phase 15 moves the shared endpoint + model into a
+repo-controlled, **non-secret** env file and lets you pick where the runner lives:
+
+- **`config/model-runner/model-runner.env`** (editable, non-secret) holds
+  `DOCKER_MODEL_RUNNER_BASE_URL` and `DOCKER_MODEL_RUNNER_MODEL=gemma4:31b`.
+- `docker-compose.model-runner.yml` loads it via `env_file:` on the API **and every**
+  `hermes-*` agent (one shared model, no per-agent drift), adds
+  `extra_hosts: host.docker.internal:host-gateway`, and embeds **no model-runner
+  service** — the stack only *connects* to a runner, it never starts one.
+
+Two modes, chosen by editing `DOCKER_MODEL_RUNNER_BASE_URL`:
+
+1. **External / host endpoint** (default `http://host.docker.internal:12434/engines/v1`)
+   — any reachable OpenAI-compatible endpoint. The host-gateway mapping makes the
+   Docker host reachable as `host.docker.internal`; Docker Desktop's Model Runner
+   listens on host TCP `12434`. Point it at a separate box with e.g.
+   `http://my-inference-host:8000/engines/v1`.
+2. **Docker Desktop local model runner** via the internal DNS name
+   `http://model-runner.docker.internal/engines/v1` (Docker Desktop 4.40+ with Model
+   Runner enabled; `docker model pull gemma4:31b`).
+
+To use **no model runner at all**, simply **don't pass** `docker-compose.model-runner.yml`
+— the default stack stays dry-run / model-less.
+
+```bash
+make compose-config-model-runner   # validate (no runner needed)
+make up-model-runner               # start with the shared runner ON
+```
+
+Phase 15 is implemented on `phase/15-login-required-model-runner-config` and
+**leaves `main` unchanged**. See **[config/model-runner/README.md](config/model-runner/README.md)**.
+
 ## Verify
 ```bash
 python -m pip install -r services/api/requirements-dev.txt

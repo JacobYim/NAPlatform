@@ -527,3 +527,62 @@ netstat -ano | findstr :3000
 
 The first-run preseed still runs exactly the same; only the host URL changes.
 
+## Phase 15 — login-required UI + endpoint-configurable model runner
+
+Phase 15는 두 가지 운영 이슈를 `main`을 건드리지 않고 수정한다.
+
+### A. 로그인 필수 (setup는 건너뛰되, 곧바로 chat이 아니라 login)
+
+Phase 14는 setup 화면을 건너뛰지만 UI가 **곧바로 chat**으로 진입했다. Phase 15는 setup 스킵 이후
+**로그인을 요구**한다 — `/` 는 `/login` 으로 리다이렉트된다. 저장소/compose로 제어되며 **preseed
+파일에는 secret이 없다**:
+
+- `config/core-webui/webui-settings.json` 에 `login_required: true` / `require_auth: true` /
+  `start_page: "login"` / `defaults.landing: "login"` 선언.
+- `docker-compose.yml` 의 `ui` 서비스에 `HERMES_WEBUI_LOGIN_REQUIRED` /
+  `HERMES_WEBUI_REQUIRE_AUTH` / `HERMES_WEBUI_START_PAGE=login`, 그리고
+  `HERMES_WEBUI_PASSWORD: "${CORE_WEBUI_PASSWORD:-ChangeMe123!}"`.
+- `ui-preseed` 가 `CORE_WEBUI_LOGIN_REQUIRED` 를 전달하고 `preseed.sh` 가 login 플래그를 뒤집되
+  비밀번호는 절대 기록하지 않는다.
+
+**로그인 동작 & 비밀번호.** 기본 로그인 경로는 NAPlatform adapter가 API `POST /auth/login` 으로
+인증하는 것이다 (seeded admin `admin@example.com` / `ChangeMe123!`). core-webui 자체 단일-비밀번호
+게이트가 있는 버전을 위해 `ui` 서비스가 `HERMES_WEBUI_PASSWORD` 를 넘긴다. 기본값 `ChangeMe123!` 는
+**문서화된 dev 전용** 값이며 `CORE_WEBUI_PASSWORD` 로 override 한다. **운영 환경은 반드시
+`CORE_WEBUI_PASSWORD` 를 설정**해야 한다:
+
+```bash
+CORE_WEBUI_PASSWORD=a-strong-unique-password docker compose up -d --build ui
+```
+
+### B. 엔드포인트 구성형 Docker Model Runner (gemma4:31b 연결 가능)
+
+기존 _"Gemma4:31B connection cannot be reached"_ 오류는 하드코딩된 내부 엔드포인트 때문이었다.
+Phase 15는 공유 엔드포인트+모델을 저장소가 관리하는 **비-secret** env 파일로 옮긴다:
+
+- **`config/model-runner/model-runner.env`** (편집 가능, secret 없음) — `DOCKER_MODEL_RUNNER_BASE_URL`
+  와 `DOCKER_MODEL_RUNNER_MODEL=gemma4:31b`.
+- `docker-compose.model-runner.yml` 이 이를 `env_file:` 로 API + **모든** `hermes-*` 에이전트에 로드하고
+  (공유 모델, drift 없음), `extra_hosts: host.docker.internal:host-gateway` 를 추가하며, **model-runner
+  서비스는 포함하지 않는다** — 스택은 러너에 **연결만** 하고 직접 기동하지 않는다.
+
+두 가지 모드 (`DOCKER_MODEL_RUNNER_BASE_URL` 편집으로 선택):
+
+1. **external / host 엔드포인트** (기본 `http://host.docker.internal:12434/engines/v1`) — host-gateway
+   매핑으로 Docker 호스트를 `host.docker.internal` 로 접근한다 (Docker Desktop Model Runner는 호스트
+   TCP `12434`). 별도 박스는 예: `http://my-inference-host:8000/engines/v1`.
+2. Docker Desktop 로컬 model runner — 내부 DNS `http://model-runner.docker.internal/engines/v1`.
+
+Model runner를 아예 쓰지 않으려면 `docker-compose.model-runner.yml` 을 **omit**(전달하지 않음)하면
+된다 — 기본 스택은 dry-run / model-less로 안전하게 유지된다.
+
+```bash
+# 검증(러너 미설치여도 OK) / 기동
+make compose-config-model-runner
+make up-model-runner
+python scripts/_phase15_check.py     # 오프라인 로그인 + 모델러너 배선 검증
+```
+
+**Branch policy:** Phase 15는 `phase/15-login-required-model-runner-config` 에서 작업하며 `main`은
+건드리지 않는다(stable). `main`은 명시적 승인 후 `make release-dev-to-main`에서만 갱신된다.
+

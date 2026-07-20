@@ -1,26 +1,35 @@
 {
   "//": [
-    "NAPlatform core-webui first-run preseed settings (Phase 14).",
-    "The Phase 14 preseed (config/core-webui/preseed.sh) copies this file into the",
+    "NAPlatform core-webui first-run preseed settings (Phase 14; login-required in Phase 15).",
+    "The preseed (config/core-webui/preseed.sh) copies this file into the",
     "core-webui state dir ($HERMES_WEBUI_STATE_DIR, default",
     "/home/hermeswebui/.hermes/webui/settings.json) BEFORE core-webui serves, and",
-    "writes a setup-completed marker, so localhost:3000 opens straight into the",
-    "workspace with NO initial setup / onboarding wizard.",
-    "core-webui's exact settings schema is owned by the external repo and may differ;",
-    "this file therefore declares the first-run-disabled semantics under several",
-    "plausible key names (first_run/setup_completed/onboarding_completed/",
-    "initial_setup_completed) so the setup screen is suppressed robustly. Adjust the",
-    "key names here if a core-webui version uses a different one — no code change is",
+    "writes a setup-completed marker, so localhost:3000 SKIPS the initial setup /",
+    "onboarding wizard.",
+    "Phase 15: after the setup screen is skipped the UI must NOT land directly in",
+    "chat — it must require login first. The login_required / require_auth /",
+    "start_page=login keys below make / redirect to /login, and defaults.landing is",
+    "'login' (not 'workspace'). core-webui's exact settings schema is owned by the",
+    "external repo and may differ; this file therefore declares both the",
+    "first-run-disabled semantics (first_run/setup_completed/onboarding_completed/",
+    "initial_setup_completed) and the login-required semantics under several",
+    "plausible key names so the behavior is robust across versions. Adjust the key",
+    "names here if a core-webui version uses a different one — no code change is",
     "needed, this is pure repo-controlled config.",
     "NO SECRETS: passwords, tokens and API keys are NEVER placed in this file. The",
-    "session token is minted by the API at login and kept in browser memory by the",
-    "adapter (services/ui/adapter/naplatform-adapter.js)."
+    "login password is supplied to the ui container via the HERMES_WEBUI_PASSWORD /",
+    "CORE_WEBUI_PASSWORD env (see docker-compose.yml), NOT here. The session token is",
+    "minted by the API at login and kept in browser memory by the adapter",
+    "(services/ui/adapter/naplatform-adapter.js)."
   ],
   "first_run": false,
   "setup_completed": true,
   "onboarding_completed": true,
   "initial_setup_completed": true,
   "show_setup_wizard": false,
+  "login_required": true,
+  "require_auth": true,
+  "start_page": "login",
   "branding": {
     "name": "HMGMA",
     "logo": "/apptoo/branding/logo.jpg",
@@ -34,7 +43,10 @@
     "mode": "external",
     "module": "adapter/naplatform-adapter.js",
     "contract": "adapter/contract.json",
-    "token_storage": "memory"
+    "token_storage": "memory",
+    "login_required": true,
+    "require_auth": true,
+    "start_page": "login"
   },
   "endpoints": {
     "api_base_url": "http://api:8080",
@@ -48,6 +60,6 @@
   },
   "defaults": {
     "departments": ["ER", "IT", "EHS", "QC"],
-    "landing": "workspace"
+    "landing": "login"
   }
 }
