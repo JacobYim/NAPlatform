@@ -36,6 +36,8 @@ class HdfsDirProvision(BaseModel):
     path:str; kind:str; owner:str; group:str; mode:str; plan:list[HdfsCommandPlan]=Field(default_factory=list); results:list[HdfsCommandResult]=Field(default_factory=list)
 class HdfsProvisionReport(BaseModel):
     user_id:str|None=None; username:str; enabled:bool; dry_run:bool; targets:list[HdfsDirProvision]=Field(default_factory=list)
+class HdfsHealthReport(BaseModel):
+    enabled:bool; dry_run:bool; checked:bool=False; healthy:bool|None=None; plan:HdfsCommandPlan; result:HdfsCommandResult|None=None
 class WorkspaceHdfsResponse(BaseModel):
     user_id:str; username:str; personal_root:str; department_roots:list[str]; enabled:bool; dry_run:bool; provisioning_status:str; plan:list[HdfsDirProvision]=Field(default_factory=list)
 class VectorInsertRequest(BaseModel):

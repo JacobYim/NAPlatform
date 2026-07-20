@@ -15,7 +15,7 @@ are complete** and ready for a stable release. See [BRANCHING.md](BRANCHING.md).
 - 🔄 **In progress** — active phase branch.
 - ⏳ **Upcoming** — planned, not yet started.
 
-## Phase status (through Phase 09)
+## Phase status (through Phase 10)
 
 | Phase | Title | Status |
 |------:|-------|--------|
@@ -28,32 +28,50 @@ are complete** and ready for a stable release. See [BRANCHING.md](BRANCHING.md).
 | 06 | Department Hermes agent routing (dry-run by default, SSRF-safe) | ✅ Completed |
 | 07 | Hermes agent HTTP service (deterministic by default) | ✅ Completed |
 | 08 | Routing E2E Compose/smoke (default stack stays dry-run) | ✅ Completed |
-| **09** | **Resource E2E smoke + explicit phase upload/release workflow** | 🔄 **In progress** |
-| 10+ | Live backing services (real Qdrant/Neo4j/HDFS drivers), production hardening, stable release to `main` | ⏳ Upcoming |
+| 09 | Resource E2E smoke + explicit phase upload/release workflow | ✅ Completed |
+| **10** | **Real Qdrant/Neo4j/HDFS backend adapters (memory/dry-run by default)** | 🔄 **In progress** |
+| 11+ | Production hardening (live-backend E2E, secrets/auth, stable release to `main`) | ⏳ Upcoming |
 
-## Current phase — Phase 09 (in progress)
+## Current phase — Phase 10 (in progress)
 
-Phase 09 adds a **resource-focused** end-to-end smoke (HDFS workspace/provisioning,
-vector and graph scope, cross-department denial, audit) that complements the Phase 08
-routing smoke, and makes the git upload/release workflow explicit through Makefile
-targets so `main` is never touched by accident.
+Phase 10 adds **real backend integration scaffolds** for Qdrant, Neo4j, and HDFS
+behind the *same* scope/RBAC contract as the Phase 05 memory adapters, selectable
+per backend by env. The default stays **memory / dry-run**, so no live backing
+service is required for tests or the default stack; tests drive the real code paths
+through fake clients/drivers/runners.
 
 Deliverables:
 
-- `scripts/smoke_resources_e2e.py` — live resource smoke: admin login; idempotent
-  active QC and IT users; `GET /workspace/hdfs` returns only the caller's own
-  personal + department roots; `POST /admin/users/{id}/provision-hdfs` is a dry run
-  (commands planned, nothing executed); personal/department vector and graph
-  insert+search are scoped correctly (a QC user's records are never visible to IT);
-  cross-department denial (`403`) for vector, graph, and resource routes; and the
-  audit log contains the key resource events. It is idempotent and never prints
-  secrets.
-- `services/api/tests/test_smoke_resources_e2e.py` — unit tests driving the smoke
-  logic against a fake API (`httpx.MockTransport`); **no Docker required**.
-- Makefile targets `smoke-resources`, `smoke-all-dry-run`, `smoke-all-routing`.
-- Explicit phase upload/release Makefile targets (see below).
-- Docs: this roadmap plus resource-smoke and upload-workflow updates to
-  `README.md`, `docs/CONTAINER_GUIDE.md`, and `docs/ARCHITECTURE.md`.
+- Backend selection envs (default memory/dry-run): `VECTOR_BACKEND=memory|qdrant`,
+  `GRAPH_BACKEND=memory|neo4j`, plus the existing `HDFS_PROVISIONING_ENABLED`.
+- `app/vector.py` — `QdrantVectorBackend` + client wrapper: uses `qdrant-client`
+  when installed/configured (`QDRANT_URL`, optional `QDRANT_API_KEY`), creates the
+  collection on demand with configurable `QDRANT_VECTOR_SIZE`/`QDRANT_DISTANCE`,
+  and upserts/searches with the **same** metadata enforcement + Qdrant `Filter`
+  descriptors. The in-memory `VectorScopeAdapter` is unchanged.
+- `app/graph.py` — `Neo4jGraphBackend` + driver wrapper: uses the `neo4j` driver
+  when installed/configured (`NEO4J_URI`/`NEO4J_USER`/`NEO4J_PASSWORD`), runs
+  **parameterised Cypher only** (values bound as `$params`, only validated
+  labels/rel-types inlined), same metadata enforcement. The in-memory
+  `GraphScopeAdapter` is unchanged.
+- `app/hdfs.py` — `HdfsProvisioner.health()` readiness probe using a constant safe
+  argv (`hdfs dfs -test -d /naplatform`); dry-run by default, executes only when
+  enabled via the injected/subprocess runner.
+- `GET /admin/backends/status` (admin-only) — active vector/graph/hdfs modes,
+  redacted URLs, and a dry-run/fake health status that never leaks secrets
+  (api keys / passwords are reported only as booleans).
+- Resolvers fall back to the memory backend (with a logged warning) for an invalid
+  backend env or an unconfigured/absent real client, so the API never fails to
+  start because of a backend env.
+- `services/api/tests/test_backends.py` — fake-driven tests: memory default
+  unchanged, Qdrant upsert/search/filter/collection creation, Neo4j params/no
+  interpolation, backends status admin-only + no secrets, HDFS health planning,
+  invalid-env rejection + safe fallback. **No live Qdrant/Neo4j/HDFS required.**
+- Requirements add `qdrant-client` and `neo4j` (optional at runtime); docs updated
+  (`README.md`, `docs/ARCHITECTURE.md`, `docs/CONTAINER_GUIDE.md`, this roadmap).
+
+Phase 09 (resource E2E smoke + explicit phase upload/release workflow) is complete
+and merged into `dev`.
 
 ## Phase upload / release workflow (explicit, main stays stable)
 
@@ -69,9 +87,9 @@ branch).
 | 3. Release (final only) | `make release-dev-to-main` | **Yes** | checkout `main`, merge `dev`, push `main` |
 
 ```bash
-# Phase 09 example (main is never updated by steps 1–2):
-make push-phase                         # pushes phase/09-resource-e2e-smoke
-make merge-phase-to-dev                 # merges phase/09-... into dev, pushes dev
+# Phase 10 example (main is never updated by steps 1–2):
+make push-phase                         # pushes phase/10-real-backend-adapters
+make merge-phase-to-dev                 # merges phase/10-... into dev, pushes dev
 # ...only after ALL planned phases are done and a stable release is intended:
 make release-dev-to-main                # the ONLY step that updates main
 ```
@@ -83,15 +101,28 @@ make push-phase PHASE_BRANCH=phase/09-resource-e2e-smoke
 make merge-phase-to-dev PHASE_BRANCH=phase/09-resource-e2e-smoke
 ```
 
-## Verify Phase 09 locally
+## Verify Phase 10 locally
 
 ```bash
 make smoke-unit        # routing + resource smoke unit tests (no Docker)
-make test              # full pytest suite
+make test              # full pytest suite (incl. test_backends.py — fake backends)
 make compile           # byte-compile api + hermes-agent + scripts
-make smoke-resources   # in-cluster resource smoke (needs a running stack)
-make smoke-all-dry-run # routing (dry-run) + resource smoke against the default stack
+make compose-config    # validate the default (memory/dry-run) Compose config
+make build             # build the api + hermes-agent images
 ```
 
-`main` remains the stable baseline until the final release. Phase 09 is implemented
-on `phase/09-resource-e2e-smoke` and **leaves `main` unchanged**.
+Try the real backends without leaving dry-run for the rest of the stack:
+
+```bash
+# Bring up the shared services, then run the API with a real backend selected:
+docker compose up -d qdrant neo4j
+VECTOR_BACKEND=qdrant QDRANT_URL=http://localhost:6333 \
+GRAPH_BACKEND=neo4j NEO4J_URI=bolt://localhost:7687 NEO4J_USER=neo4j \
+NEO4J_PASSWORD=naplatform-password \
+  uvicorn app.main:app --app-dir services/api --port 8080
+# Inspect active modes (admin-only, secrets redacted):
+curl -s localhost:8080/admin/backends/status -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+`main` remains the stable baseline until the final release. Phase 10 is implemented
+on `phase/10-real-backend-adapters` and **leaves `main` unchanged**.

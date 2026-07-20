@@ -7,3 +7,7 @@ SQLAlchemy==2.0.36
 redis==5.2.1
 psycopg[binary]==3.2.3
 httpx==0.28.1
+# Phase 10 real backends. Only imported when VECTOR_BACKEND=qdrant /
+# GRAPH_BACKEND=neo4j; the default memory backends never import them.
+qdrant-client==1.12.1
+neo4j==5.27.0

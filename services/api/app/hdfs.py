@@ -21,7 +21,7 @@ import re
 import subprocess
 
 from .models import (HdfsCommandPlan, HdfsCommandResult, HdfsDirProvision,
-                     HdfsProvisionReport, WorkspaceHdfsResponse)
+                     HdfsHealthReport, HdfsProvisionReport, WorkspaceHdfsResponse)
 from .models import User
 from .rbac import BASE, normalize_department, normalize_hdfs_path
 
@@ -172,6 +172,34 @@ class HdfsProvisioner:
         """Dry-run only: return the planned dirs without ever executing."""
         return [p for p, _argvs in self.build_targets(username, departments)]
 
+    # --- health / readiness ------------------------------------------------
+    def health_plan(self) -> tuple[list[str], HdfsCommandPlan]:
+        """Build the readiness command: `hdfs dfs -test -d <BASE>`.
+
+        The argv is fully constant — the only inputs are the trusted `HDFS_BIN`
+        and the fixed `BASE` root — so there is no user-controlled/injection
+        surface. `-test -d` returns 0 iff the base workspace directory exists,
+        which is a good proxy for "namenode reachable and initialized".
+        """
+        return self._cmd([self.hdfs_bin, "dfs", "-test", "-d", BASE],
+                         "check base workspace dir exists (readiness probe)")
+
+    def health(self) -> HdfsHealthReport:
+        """Plan (and, only when enabled, execute) the HDFS readiness probe.
+
+        Default (disabled) is a dry run: the command is planned but never spawned,
+        `checked=False`, `healthy=None`. When enabled, the probe runs via the
+        injected/subprocess runner and `healthy` reflects a 0 exit code.
+        """
+        argv, plan = self.health_plan()
+        if not self.enabled:
+            return HdfsHealthReport(enabled=False, dry_run=True, checked=False,
+                                    healthy=None, plan=plan)
+        result = self._execute(argv, plan)
+        healthy = result.returncode == 0
+        return HdfsHealthReport(enabled=True, dry_run=False, checked=True,
+                                healthy=healthy, plan=plan, result=result)
+
     # --- User-facing convenience ------------------------------------------
     def provision_user(self, user: User) -> HdfsProvisionReport:
         return self.provision(user.username,
@@ -189,3 +217,22 @@ class HdfsProvisioner:
             dry_run=True,
             provisioning_status="enabled" if self.enabled else "dry_run",
             plan=plan)
+
+
+def backend_status() -> dict:
+    """Secret-free HDFS provisioning status for the admin backends endpoint.
+
+    Reports the provisioning mode and the *planned* (never executed) readiness
+    command. Nothing here spawns a subprocess or exposes credentials — HDFS auth
+    is Kerberos/proxy-user based and not held by this service.
+    """
+    prov = HdfsProvisioner()
+    _argv, plan = prov.health_plan()
+    return {"backend": "hdfs", "mode": "hdfs",
+            "provisioning_enabled": prov.enabled,
+            "dry_run": not prov.enabled,
+            "hdfs_bin": prov.hdfs_bin, "base": BASE,
+            "healthy": None,  # dry-run status never executes the probe
+            "health_command": plan.command,
+            "detail": ("provisioning enabled" if prov.enabled
+                       else "dry-run (no subprocess)")}

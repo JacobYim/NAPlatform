@@ -138,6 +138,34 @@ make release-dev-to-main # RELEASE ONLY — the one step that updates main
 
 Environment (Phase 09 smoke): `SMOKE_API_BASE_URL`, `SMOKE_ADMIN_PASSWORD`/`ADMIN_PASSWORD`, `SMOKE_QC_EMAIL`/`SMOKE_QC_USERNAME`/`SMOKE_QC_PASSWORD`, `SMOKE_IT_EMAIL`/`SMOKE_IT_USERNAME`/`SMOKE_IT_PASSWORD`, `SMOKE_VECTOR_COLLECTION`, `SMOKE_GRAPH_LABEL`, `SMOKE_HEALTH_RETRIES`, `SMOKE_HEALTH_INTERVAL`, `SMOKE_REQUEST_TIMEOUT`.
 
+## Phase 10 — Real Qdrant/Neo4j/HDFS backend adapters (memory/dry-run by default)
+
+Phase 10 makes the vector, graph, and HDFS backends **pluggable behind the same scope/RBAC contract**. Each backend is selected by env and defaults to the Phase 05 in-memory / dry-run scaffold, so tests and the default stack need **no live Qdrant/Neo4j/HDFS**. The real drivers are exercised in tests through fake clients/drivers/runners. Full phase status lives in [`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+- **Backend selection envs (default memory/dry-run):** `VECTOR_BACKEND=memory|qdrant`, `GRAPH_BACKEND=memory|neo4j`, and the existing `HDFS_PROVISIONING_ENABLED=true|false`.
+- **`app/vector.py` — `QdrantVectorBackend`** — uses `qdrant-client` when installed/configured (`QDRANT_URL`, optional `QDRANT_API_KEY`), **creates the collection on demand** with configurable `QDRANT_VECTOR_SIZE` (default `768`) / `QDRANT_DISTANCE` (default `Cosine`), and upserts/searches through a client wrapper enforcing the **same** scope metadata and Qdrant `Filter` descriptors as the memory adapter. `VectorScopeAdapter` (memory) is unchanged.
+- **`app/graph.py` — `Neo4jGraphBackend`** — uses the `neo4j` driver when installed/configured (`NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`), runs **parameterised Cypher only** — every scope value / user property is a bound `$param`, and the only inlined identifiers are the strictly-validated label / relationship type. `GraphScopeAdapter` (memory) is unchanged.
+- **`app/hdfs.py` — `HdfsProvisioner.health()`** — an HDFS readiness probe built from a **constant safe argv** (`hdfs dfs -test -d /naplatform`, no user input, no shell string). Dry run by default (planned, never executed); runs via the injected/subprocess runner only when provisioning is enabled.
+- **`GET /admin/backends/status`** (admin-only) — reports the active vector/graph/hdfs modes, **redacted** connection URLs, and a dry-run/fake health status. Secrets never leak: api keys and passwords are reported only as booleans (`api_key_set`, `password_set`).
+- **Safe fallback** — an invalid `VECTOR_BACKEND`/`GRAPH_BACKEND`, a missing driver library, or an unconfigured real backend degrades to the in-memory scaffold with a logged warning, so the API never fails to start because of a backend env. The strict factories (`build_vector_backend`/`build_graph_backend`) still reject an unknown mode.
+
+The `/vector/{department}` and `/graph/{department}` API contracts are unchanged — they use whichever backend the env selects, defaulting to memory.
+
+```bash
+# Default (memory/dry-run) — no live backends needed:
+docker compose -f docker-compose.yml up -d --build
+curl -s localhost:8080/admin/backends/status -H "Authorization: Bearer $ADMIN_TOKEN"
+
+# Opt into the real backends (qdrant/neo4j services already run in Compose):
+docker compose up -d qdrant neo4j
+VECTOR_BACKEND=qdrant QDRANT_URL=http://localhost:6333 \
+GRAPH_BACKEND=neo4j NEO4J_URI=bolt://localhost:7687 NEO4J_USER=neo4j \
+NEO4J_PASSWORD=naplatform-password \
+  uvicorn app.main:app --app-dir services/api --port 8080
+```
+
+Real-backend deps (`qdrant-client`, `neo4j`) are pinned in `services/api/requirements.txt` but only imported when their backend is selected. Tests: `services/api/tests/test_backends.py` (fake-driven, no Docker).
+
 ## Verify
 ```bash
 python -m pip install -r services/api/requirements-dev.txt
@@ -153,4 +181,4 @@ Local seeded admin: `admin@example.com` / `ChangeMe123!`.
 
 ## Branching
 
-See `docs/BRANCHING.md` for the policy and `docs/ROADMAP.md` for full phase status. Phase branches merge into `dev`; `main` remains the stable/default branch and is updated from `dev` only after all planned phases are complete. The upload/release workflow is explicit via `make push-phase`, `make merge-phase-to-dev`, and (release only) `make release-dev-to-main`. Phase 09 was implemented on `phase/09-resource-e2e-smoke` and **leaves `main` unchanged**.
+See `docs/BRANCHING.md` for the policy and `docs/ROADMAP.md` for full phase status. Phase branches merge into `dev`; `main` remains the stable/default branch and is updated from `dev` only after all planned phases are complete. The upload/release workflow is explicit via `make push-phase`, `make merge-phase-to-dev`, and (release only) `make release-dev-to-main`. Phase 10 is implemented on `phase/10-real-backend-adapters` and **leaves `main` unchanged**.
