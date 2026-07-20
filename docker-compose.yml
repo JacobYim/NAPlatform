@@ -147,7 +147,10 @@ services:
       HERMES_WEBUI_SETUP_COMPLETED: "true"
       HERMES_WEBUI_DISABLE_FIRST_RUN: "true"
       HERMES_WEBUI_SKIP_ONBOARDING: "true"
-    ports: ["3000:8787"]
+    ports:
+      # Default UI URL is http://localhost:3000. If port 3000 is already in use,
+      # run with UI_HOST_PORT=3001 and open http://localhost:3001 instead.
+      - "${UI_HOST_PORT:-3000}:8787"
     volumes:
       - ui-hermes-home:/home/hermeswebui/.hermes
       - ui-workspace:/workspace

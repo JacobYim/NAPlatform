@@ -351,3 +351,34 @@ This runbook never runs `release-dev-to-main` and never checks out or pushes `ma
 Promotion to `main` happens **only** at the final, explicitly-approved release step
 documented in `docs/FINAL_RELEASE_CHECKLIST.md` and `docs/ROADMAP.md`. Phase 13 work
 lives on `phase/13-docker-model-runner-gemma4-powershell` and merges into `dev`.
+
+### UI port conflict: host port 3000 already in use
+
+The UI container listens on port `8787` internally and publishes to host port `3000` by default. If Docker reports `address already in use` for `0.0.0.0:3000`, keep the same stack and choose another host port:
+
+```bash
+UI_HOST_PORT=3001 CORE_WEBUI_CONTEXT=../core-webui docker compose up -d --build ui
+```
+
+Then open:
+
+```text
+http://localhost:3001
+```
+
+PowerShell equivalent:
+
+```powershell
+$env:UI_HOST_PORT = "3001"
+$env:CORE_WEBUI_CONTEXT = "..\core-webui"
+docker compose up -d --build ui
+```
+
+To discover what owns port 3000 on Windows:
+
+```powershell
+netstat -ano | findstr :3000
+```
+
+The first-run preseed still runs exactly the same; only the host URL changes.
+
