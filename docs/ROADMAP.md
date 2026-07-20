@@ -15,7 +15,7 @@ are complete** and ready for a stable release. See [BRANCHING.md](BRANCHING.md).
 - 🔄 **In progress** — active phase branch.
 - ⏳ **Upcoming** — planned, not yet started.
 
-## Phase status (through Phase 10)
+## Phase status (through Phase 11)
 
 | Phase | Title | Status |
 |------:|-------|--------|
@@ -29,10 +29,49 @@ are complete** and ready for a stable release. See [BRANCHING.md](BRANCHING.md).
 | 07 | Hermes agent HTTP service (deterministic by default) | ✅ Completed |
 | 08 | Routing E2E Compose/smoke (default stack stays dry-run) | ✅ Completed |
 | 09 | Resource E2E smoke + explicit phase upload/release workflow | ✅ Completed |
-| **10** | **Real Qdrant/Neo4j/HDFS backend adapters (memory/dry-run by default)** | 🔄 **In progress** |
-| 11+ | Production hardening (live-backend E2E, secrets/auth, stable release to `main`) | ⏳ Upcoming |
+| 10 | Real Qdrant/Neo4j/HDFS backend adapters (memory/dry-run by default) | ✅ Completed |
+| **11** | **core-webui auth/session UI integration adapter (no live UI in tests)** | 🔄 **In progress** |
+| 12+ | Production hardening (live-backend E2E, secrets/auth, stable release to `main`) | ⏳ Upcoming |
 
-## Current phase — Phase 10 (in progress)
+## Current phase — Phase 11 (in progress)
+
+Phase 11 wires the external post-login UI (`github.com/JacobYim/core-webui`) to the
+NAPlatform auth/session API through a **repo-controlled adapter package**, so the
+login/signup/session/department-selector flows are integrated and *tested here*
+without a live browser or the external UI checked out. Phase 10 (real backend
+adapters) is complete and merged into `dev`.
+
+Deliverables:
+
+- **Adapter package (`services/ui/adapter/`)** — a dependency-free ES module
+  (`naplatform-adapter.js`), a machine-readable `contract.json` (the single source
+  of truth both the JS adapter and the Python tests read), a static `index.html`
+  demo, `package.json`, and a `README.md`. The token lives only in memory; no
+  secret is ever embedded in these files.
+- **API support endpoints (contracts preserved, additive only):**
+  - `GET /auth/me` — alias of `/core-webui/session` (same bootstrap shape).
+  - `GET /auth/departments/options` — public option list for the signup / selector.
+  - `POST /auth/logout` — invalidates the Redis/memory session (idempotent safe
+    logout; audited when a real session is present).
+  - `GET /core-webui/session/status` — status for *any* valid session so the UI can
+    render the **approval-waiting UX** for a pending/disabled account; an
+    expired/invalid session is `401`.
+  - `POST /core-webui/session/select-department` — validates department membership
+    and returns the chat/context/resource routes (non-member `403`, unknown `400`).
+- **Session bootstrap model (`app/webui.py`)** — pure helpers building the
+  department routes (so the UI routes chat to `/agents/{department}/chat`), the
+  public department options, and the approval-waiting UX contract. `/core-webui/session`
+  and `/auth/me` now carry `session_status`, `chat_route_template`,
+  `department_routes[]`, and `approval` (all additive; existing consumers ignore them).
+- **Tests (no live UI):** `services/api/tests/test_webui_session.py` (login success,
+  pending blocked at login + approval-waiting session status, department options,
+  logout invalidation, member vs non-member department selection, `/auth/me` alias,
+  401 on expired session) and `services/api/tests/test_webui_adapter_contract.py`
+  (every `contract.json` endpoint exists on the app with the right method/response
+  shape, the JS adapter references every contract path, and **no token/secret leaks**
+  into the adapter files).
+
+## Phase 10 — Real Qdrant/Neo4j/HDFS backend adapters (memory/dry-run by default)
 
 Phase 10 adds **real backend integration scaffolds** for Qdrant, Neo4j, and HDFS
 behind the *same* scope/RBAC contract as the Phase 05 memory adapters, selectable
@@ -72,6 +111,22 @@ Deliverables:
 
 Phase 09 (resource E2E smoke + explicit phase upload/release workflow) is complete
 and merged into `dev`.
+
+## Verify Phase 11 locally
+
+```bash
+python -m pip install -r services/api/requirements-dev.txt
+pytest -q services/api/tests/test_webui_session.py \
+       services/api/tests/test_webui_adapter_contract.py   # UI adapter, no browser
+make test              # full pytest suite (api + hermes-agent + smoke unit)
+make compile           # byte-compile api + hermes-agent + scripts
+make compose-config    # validate the default (memory/dry-run) Compose config
+make build             # build the api + hermes-agent images
+```
+
+The adapter itself is static (`services/ui/adapter/`); open `index.html` against a
+running API to drive the flow by hand. Building the external `ui` service is **not**
+required for tests.
 
 ## Phase upload / release workflow (explicit, main stays stable)
 
@@ -124,5 +179,6 @@ NEO4J_PASSWORD=naplatform-password \
 curl -s localhost:8080/admin/backends/status -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 
-`main` remains the stable baseline until the final release. Phase 10 is implemented
-on `phase/10-real-backend-adapters` and **leaves `main` unchanged**.
+`main` remains the stable baseline until the final release. Phase 11 is implemented
+on `phase/11-core-webui-auth-session-integration` and **leaves `main` unchanged**;
+Phase 10 (`phase/10-real-backend-adapters`) is complete and merged into `dev`.

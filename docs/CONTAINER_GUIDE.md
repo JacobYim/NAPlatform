@@ -302,6 +302,54 @@ NEO4J_PASSWORD=naplatform-password \
 `main` branch policy는 이전 Phase와 동일하다: Phase 10은 `phase/10-real-backend-adapters`에서 작업하고
 `main`은 릴리스 단계에서만 갱신되어 stable 상태로 남는다.
 
+## core-webui auth/session UI integration — Phase 11
+
+로그인 이후 실제 UI는 외부 `github.com/JacobYim/core-webui`이며 repo에 vendor하지 않는다.
+Phase 11은 그 UI를 NAPlatform API에 연결하는 **repo 소유 adapter**(`services/ui/adapter/`)를
+추가한다: 의존성 없는 ES module `naplatform-adapter.js`, 계약 단일 소스 `contract.json`, 정적
+`index.html` 데모, `package.json`, `README.md`. 세션 토큰은 클라이언트 메모리에만 두며 어떤
+adapter 파일에도 secret을 넣지 않는다.
+
+API 지원 endpoint(기존 계약 보존, 추가만):
+
+| Method | Path | Auth | 용도 |
+|--------|------|------|------|
+| `GET`  | `/auth/departments/options` | none | signup/부서 선택 드롭다운 옵션(세션 전 public) |
+| `POST` | `/auth/login` | none | 세션 토큰 발급(pending/disabled → `403`) |
+| `POST` | `/auth/logout` | session | Redis/memory 세션 무효화(idempotent) |
+| `GET`  | `/auth/me` | active | 세션 부트스트랩(`/core-webui/session` alias) |
+| `GET`  | `/core-webui/session/status` | session | 모든 유효 세션 상태 → 승인 대기 UX(만료 세션 `401`) |
+| `POST` | `/core-webui/session/select-department` | active | 부서 membership 검증 후 route 반환(비-member `403`, unknown `400`) |
+
+```bash
+# 부서 옵션은 public (세션 불필요)
+curl -s http://localhost:8080/auth/departments/options | jq .
+
+# active 세션 부트스트랩 + 부서 route (UI는 department_routes[].chat_route로 chat 라우팅)
+curl -s http://localhost:8080/auth/me -H "Authorization: Bearer <TOKEN>" | jq '.session_status, .department_routes'
+
+# 부서 선택(비-member면 403)
+curl -s -X POST http://localhost:8080/core-webui/session/select-department \
+  -H "Authorization: Bearer <TOKEN>" -H 'Content-Type: application/json' \
+  -d '{"department":"QC"}' | jq .
+
+# 승인 대기/만료 처리: 세션 상태만 조회(pending이면 can_access:false, 만료면 401)
+curl -s http://localhost:8080/core-webui/session/status -H "Authorization: Bearer <TOKEN>" | jq '.can_access, .approval'
+
+# 로그아웃(세션 무효화, idempotent)
+curl -s -X POST http://localhost:8080/auth/logout -H "Authorization: Bearer <TOKEN>" | jq .
+```
+
+정적 adapter 데모는 실행 중인 API를 상대로 `services/ui/adapter/index.html`을 브라우저로 열어
+수동 확인한다(외부 `ui` 서비스 build 불필요). 테스트는 live UI 없이 동작한다:
+
+```bash
+pytest -q services/api/tests/test_webui_session.py services/api/tests/test_webui_adapter_contract.py
+```
+
+**Branch policy:** Phase 11은 `phase/11-core-webui-auth-session-integration`에서 작업하며 `main`은
+건드리지 않는다(`docs/BRANCHING.md`, `docs/ROADMAP.md`).
+
 ## Separate core-webui UI
 ```bash
 CORE_WEBUI_CONTEXT=../core-webui docker compose up -d ui

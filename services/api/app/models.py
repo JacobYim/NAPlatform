@@ -14,8 +14,26 @@ class AgentContext(BaseModel):
     user_id:str; username:str; department:str; hdfs_roots:list[str]; qdrant_filter:dict; neo4j_filter:dict; allowed_tools:list[str]; allowed_mcp_servers:list[str]
 class CoreWebUILaunchConfig(BaseModel):
     brand_name:str; brand_logo:str; api_base_url:str; webui_url:str
+# --- Phase 11: core-webui auth/session UI integration --------------------
+class DepartmentOption(BaseModel):
+    value:str; label:str
+class DepartmentRoute(BaseModel):
+    department:str; label:str; chat_route:str; context_route:str; resources_route:str
+class DepartmentOptionsResponse(BaseModel):
+    departments:list[DepartmentOption]=Field(default_factory=list)
 class SessionBootstrapResponse(BaseModel):
     user_id:str; username:str; email:EmailStr; is_admin:bool; status:UserStatus; departments:list[str]; default_department:str|None; core_webui:CoreWebUILaunchConfig
+    # Additive Phase 11 UI-routing fields (existing consumers ignore them):
+    session_status:str="active"; chat_route_template:str="/agents/{department}/chat"
+    department_routes:list[DepartmentRoute]=Field(default_factory=list); approval:dict=Field(default_factory=dict)
+class SessionStatusResponse(BaseModel):
+    user_id:str; username:str; email:EmailStr; is_admin:bool; status:UserStatus; can_access:bool; pending:bool; approval:dict=Field(default_factory=dict); departments:list[str]=Field(default_factory=list)
+class SelectDepartmentRequest(BaseModel):
+    department:str
+class SelectedDepartmentResponse(BaseModel):
+    department:str; is_member:bool; route:DepartmentRoute
+class LogoutResponse(BaseModel):
+    message:str; invalidated:bool
 class ChatRequest(BaseModel):
     message:str=Field(min_length=1); session_id:str|None=None
 class ChatResponse(BaseModel):

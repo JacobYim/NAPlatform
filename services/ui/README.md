@@ -34,3 +34,17 @@ BRAND_LOGO: /apptoo/branding/logo.jpg
 
 향후 Phase에서는 NAPlatform 로그인/승인 세션을 core-webui에 SSO/adapter로 연결해,
 로그인 후 core-webui가 `/agents/{department}/context`에서 받은 허용 tool/MCP/HDFS/vector/graph scope만 사용하게 한다.
+
+## Phase 11 — auth/session 통합 adapter (`adapter/`)
+
+core-webui는 외부 저장소라 여기에 vendor하지 않으므로, 그 UI의 login/signup/session/부서 선택
+흐름을 NAPlatform API에 연결하는 **repo 소유 adapter**를 `adapter/`에 둔다. 의존성 없는 ES module
+`adapter/naplatform-adapter.js`, 계약 단일 소스 `adapter/contract.json`, 정적 데모 `adapter/index.html`,
+`adapter/package.json`, `adapter/README.md`로 구성된다. 세션 토큰은 클라이언트 메모리에만 두고 어떤
+파일에도 secret을 넣지 않는다.
+
+adapter가 사용하는 API endpoint(추가만, 기존 계약 보존): `GET /auth/departments/options`,
+`POST /auth/login`, `POST /auth/logout`, `GET /auth/me`(= `/core-webui/session`),
+`GET /core-webui/session/status`(승인 대기/만료 UX), `POST /core-webui/session/select-department`.
+자세한 흐름과 보안 주의는 `adapter/README.md`, live UI 없는 테스트는
+`services/api/tests/test_webui_session.py` / `test_webui_adapter_contract.py`를 본다.

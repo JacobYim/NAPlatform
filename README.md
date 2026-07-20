@@ -166,6 +166,51 @@ NEO4J_PASSWORD=naplatform-password \
 
 Real-backend deps (`qdrant-client`, `neo4j`) are pinned in `services/api/requirements.txt` but only imported when their backend is selected. Tests: `services/api/tests/test_backends.py` (fake-driven, no Docker).
 
+## Phase 11 — core-webui auth/session UI integration adapter (no live UI in tests)
+
+The real post-login UI is external (`github.com/JacobYim/core-webui`) and is **not**
+vendored here. Phase 11 adds a **repo-controlled adapter** that connects that UI's
+login/signup/session/department-selector flows to the NAPlatform API, so the
+integration is tested here with **no live browser or external checkout**. Full phase
+status lives in [`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+- **Adapter package (`services/ui/adapter/`)** — a dependency-free ES module
+  (`naplatform-adapter.js`), a machine-readable `contract.json` (single source of
+  truth both the JS adapter and the Python tests read), a static `index.html` demo,
+  `package.json`, and a `README.md`. The session token lives only in memory; no
+  secret is embedded in any adapter file (a test enforces this).
+- **API support endpoints (additive; existing contracts preserved):**
+  - `GET /auth/me` — alias of `/core-webui/session` (same bootstrap shape).
+  - `GET /auth/departments/options` — public option list for the signup / selector.
+  - `POST /auth/logout` — invalidates the Redis/memory session (idempotent safe
+    logout; audited when a real session is present).
+  - `GET /core-webui/session/status` — status for *any* valid session so the UI can
+    render the **approval-waiting UX** for a pending/disabled account; an
+    expired/invalid session is `401`.
+  - `POST /core-webui/session/select-department` — validates department membership
+    and returns the chat/context/resource routes (non-member `403`, unknown `400`).
+- **Session bootstrap model (`app/webui.py`)** — pure helpers building the
+  department routes (so the UI routes chat to `/agents/{department}/chat`), the
+  public department options, and the approval-waiting UX contract. `/core-webui/session`
+  and `/auth/me` now also carry `session_status`, `chat_route_template`,
+  `department_routes[]`, and `approval` (all additive).
+- **Pending / inactive handling** — a fresh signup is `pending` and cannot log in
+  (`403`); an account revoked after login gets `403` on `/core-webui/session` but a
+  `can_access:false` approval contract on `/core-webui/session/status`; an
+  expired/invalid session is `401` everywhere.
+
+```bash
+# The department-selector option list is public (no session yet):
+curl -s localhost:8080/auth/departments/options | jq .
+# Bootstrap + department routes for an active session:
+curl -s localhost:8080/auth/me -H "Authorization: Bearer $TOKEN" | jq '.department_routes'
+# Log out (invalidates the session; idempotent):
+curl -s -X POST localhost:8080/auth/logout -H "Authorization: Bearer $TOKEN" | jq .
+```
+
+Tests: `services/api/tests/test_webui_session.py` and
+`services/api/tests/test_webui_adapter_contract.py` (no Docker, no browser).
+
 ## Verify
 ```bash
 python -m pip install -r services/api/requirements-dev.txt
@@ -181,4 +226,4 @@ Local seeded admin: `admin@example.com` / `ChangeMe123!`.
 
 ## Branching
 
-See `docs/BRANCHING.md` for the policy and `docs/ROADMAP.md` for full phase status. Phase branches merge into `dev`; `main` remains the stable/default branch and is updated from `dev` only after all planned phases are complete. The upload/release workflow is explicit via `make push-phase`, `make merge-phase-to-dev`, and (release only) `make release-dev-to-main`. Phase 10 is implemented on `phase/10-real-backend-adapters` and **leaves `main` unchanged**.
+See `docs/BRANCHING.md` for the policy and `docs/ROADMAP.md` for full phase status. Phase branches merge into `dev`; `main` remains the stable/default branch and is updated from `dev` only after all planned phases are complete. The upload/release workflow is explicit via `make push-phase`, `make merge-phase-to-dev`, and (release only) `make release-dev-to-main`. Phase 11 is implemented on `phase/11-core-webui-auth-session-integration` and **leaves `main` unchanged**.
