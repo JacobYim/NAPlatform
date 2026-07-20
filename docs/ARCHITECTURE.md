@@ -200,3 +200,32 @@ non-zero→502, 안전한 argv 구성. 또한 API 측 `test_agent_service_shape.
 router payload가 서비스 `InvokeRequest` 계약과 일치하고 서비스 응답 형태를 router가 수용함을 증명한다.
 테스트는 `services/hermes-agent/tests`에 있고 API 테스트와 함께 실행된다(`pytest.ini`가 두 경로를
 `pythonpath`/`testpaths`에 등록; agent 패키지명은 API의 `app`과 충돌하지 않도록 `hermes_agent`).
+
+## Phase 08 — Routing E2E Compose/smoke (scaffold)
+
+Phase 06/07까지 API↔agent HTTP 경로와 그 계약을 갖췄다. Phase 08은 그 경로를 **live 스택에서 실제로
+켜고 검증**하는 수단을 더하되, 안전한 기본값은 바꾸지 않는다. 핵심 설계는 **기본 `docker-compose.yml`은
+언제나 dry-run**(`AGENT_ROUTING_ENABLED=false`)이고, routing을 켜는 것은 `-f`로만 로드되는 override로
+분리하며, smoke는 Compose 네트워크 안에서 실제 HTTP를 구동하는 것이다.
+
+- **`docker-compose.override.routing.yml`** — 평범한 `up`에 자동 로드되지 않는 override. `api`의
+  `AGENT_ROUTING_ENABLED`만 `true`로 바꾸고 기존 `hermes-er/it/ehs/qc` 서비스와 내부
+  URL(`http://hermes-<dep>:8080`)을 재사용한다. 새 agent 서비스도, agent host port도 추가하지 않는다.
+- **`docker-compose.smoke.yml`** — one-shot `smoke` 서비스(profile `smoke`). API 이미지를 재사용하고
+  `./scripts`를 마운트하여 네트워크 내부에서 `scripts/smoke_routing_e2e.py`를 돌린다. 내부 전용 agent에
+  서비스 이름으로 접근하기 위해 in-cluster로 실행하는 것이 핵심이다.
+- **`scripts/smoke_routing_e2e.py` — `RoutingSmoke`** — API/Hermes `/health` 대기 → seeded admin 로그인 →
+  QC user **idempotent** 생성·승인 → QC 로그인 → `POST /agents/QC/chat`. override가 켜지면
+  `hermes_invoked=true`, 기본 dry-run이면 `false`임을 확인하고 `GET /admin/agents/status`의 `enabled`와
+  교차 검증한다. QC user의 IT 거부(`403`)도 검증한다. **secret 미출력 · 재실행 안전.** 주입된 HTTP
+  client를 받으므로 Docker 없이 단위 테스트가 가능하다.
+- **보안 경계 재확인** — smoke는 사용자가 넘긴 URL을 dial하지 않고 부서 스코프는 여전히 API RBAC로
+  강제된다. override는 flag 하나만 바꿀 뿐 endpoint map(SSRF-safe)은 그대로다.
+- **테스트** — `test_smoke_routing_e2e.py`(fake API `httpx.MockTransport`로 dry-run/enabled, 기대 불일치,
+  signup idempotency, IT 거부, health retry, secret 미출력 검증), `test_routing_contract.py`(실제
+  `hermes_agent` 앱을 상대로 `AGENT_ROUTING_ENABLED=true`+`HERMES_AGENT_EXECUTION_ENABLED=false`일 때
+  API는 `hermes_invoked=true`, agent body는 `hermes_invoked=false`임을 증명).
+
+기본 스택은 그대로 dry-run이며 `main`은 변경하지 않는다(Phase 08은 `phase/08-routing-e2e-compose`에서
+작업; `docs/BRANCHING.md`). 실제 Hermes CLI 실행은 agent의 `HERMES_AGENT_EXECUTION_ENABLED=true`로만
+켜지며, override는 API 레벨 HTTP 라우팅만 활성화한다.

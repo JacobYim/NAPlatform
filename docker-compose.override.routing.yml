@@ -1,0 +1,25 @@
+# Phase 08 — routing override.
+#
+# This file is NOT applied by a plain `docker compose up` (only the default
+# docker-compose.yml + an optional docker-compose.override.yml are auto-loaded).
+# It must be passed explicitly with `-f`, so the default stack stays SAFE /
+# DRY-RUN (AGENT_ROUTING_ENABLED=false). Applying this file flips only the API's
+# routing flag on; it reuses the existing hermes-er/it/ehs/qc services and their
+# internal Compose URLs (http://hermes-<dep>:8080) — no new agent services and no
+# host ports for the agents.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.override.routing.yml up -d
+#
+# Agents still return the deterministic response (hermes_invoked=false at the
+# agent) unless you additionally set HERMES_AGENT_EXECUTION_ENABLED=true on them;
+# the API-level HTTP routing (hermes_invoked=true at the API) is what this flag
+# turns on.
+services:
+  api:
+    environment:
+      AGENT_ROUTING_ENABLED: "true"
+      # Endpoints are unchanged from docker-compose.yml (internal service names):
+      #   HERMES_ER_URL=http://hermes-er:8080, ... HERMES_QC_URL=http://hermes-qc:8080
+    # Do not add hermes-* to api.depends_on here: the base agent services already
+    # depend on api for profile bootstrap metadata, so doing so would create a
+    # Compose dependency cycle. The smoke script waits for API + agents instead.

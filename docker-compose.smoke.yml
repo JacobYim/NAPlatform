@@ -1,0 +1,45 @@
+# Phase 08 — in-cluster smoke runner.
+#
+# Defines a one-shot `smoke` service (profile: smoke) that runs
+# scripts/smoke_routing_e2e.py from *inside* the Compose network, so it can reach
+# both the API (http://api:8080) and the internal-only hermes-* agents
+# (http://hermes-<dep>:8080/health) by service name. It reuses the API image
+# (which already has httpx) and mounts ./scripts read-only — nothing is baked
+# into an image.
+#
+# The `smoke` profile keeps this service out of a normal `up`. Run it explicitly:
+#
+#   # Dry-run smoke (default stack, AGENT_ROUTING_ENABLED=false):
+#   docker compose -f docker-compose.yml -f docker-compose.smoke.yml \
+#     run --rm smoke
+#
+#   # Enabled-routing smoke (add the routing override; expect hermes_invoked=true):
+#   SMOKE_EXPECT_ROUTING=true docker compose \
+#     -f docker-compose.yml -f docker-compose.override.routing.yml -f docker-compose.smoke.yml \
+#     run --rm -e SMOKE_EXPECT_ROUTING=true smoke
+#
+# SMOKE_EXPECT_ROUTING defaults to false and is cross-checked against
+# /admin/agents/status, so a mismatched expectation fails loudly.
+services:
+  smoke:
+    image: naplatform-smoke
+    build:
+      context: ./services/api
+    profiles: ["smoke"]
+    environment:
+      SMOKE_API_BASE_URL: http://api:8080
+      SMOKE_HERMES_HEALTH_URLS: >-
+        http://hermes-er:8080/health,http://hermes-it:8080/health,http://hermes-ehs:8080/health,http://hermes-qc:8080/health
+      SMOKE_EXPECT_ROUTING: "${SMOKE_EXPECT_ROUTING:-false}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:-ChangeMe123!}"
+    volumes:
+      - ./scripts:/scripts:ro
+    working_dir: /scripts
+    command: ["python", "/scripts/smoke_routing_e2e.py"]
+    depends_on:
+      - api
+      - hermes-er
+      - hermes-it
+      - hermes-ehs
+      - hermes-qc
+    restart: "no"

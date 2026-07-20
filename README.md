@@ -76,17 +76,46 @@ Tests live under `services/hermes-agent/tests` and run together with the API tes
 
 The actual post-login runtime UI is `github.com/JacobYim/core-webui`. The Compose `ui` service builds that repository and applies HMGMA branding with `BRAND_NAME=HMGMA` and the included `branding/logo.jpg` (`HMG Metaplant America`).
 
+## Phase 08 — Routing E2E Compose/smoke (default stack stays dry-run)
+
+Phase 08 makes the enabled-routing path runnable and verifiable end-to-end without changing the safe default. The plain `docker-compose.yml` keeps `AGENT_ROUTING_ENABLED=false`; a separate override flips it on, and an in-cluster smoke script exercises the real HTTP path.
+
+- **`docker-compose.override.routing.yml`** — a `-f`-only override (never auto-loaded) that sets `AGENT_ROUTING_ENABLED=true` on the `api` service and reuses the existing `hermes-er/it/ehs/qc` services and their internal URLs (`http://hermes-<dep>:8080`). A plain `docker compose up` is unaffected and stays dry-run.
+- **`docker-compose.smoke.yml`** — a one-shot `smoke` service (profile `smoke`) that runs `scripts/smoke_routing_e2e.py` from *inside* the Compose network (reusing the API image, mounting `./scripts`), so it can reach both the API and the internal-only agents by service name.
+- **`scripts/smoke_routing_e2e.py`** — waits for API + Hermes health, logs in as the seeded admin, **idempotently** creates and approves a QC user, logs in as that user, calls `POST /agents/QC/chat`, and asserts `hermes_invoked` is `true` with the routing override and `false` in the default dry-run stack (cross-checked against `GET /admin/agents/status`). It also asserts the QC user is denied IT (`403`). It never prints secrets (passwords or session tokens) and is safe to re-run.
+- **Tests (no Docker)** — `services/api/tests/test_smoke_routing_e2e.py` drives the smoke logic against a fake API (`httpx.MockTransport`), covering dry-run vs enabled, expectation mismatch, signup idempotency, and IT denial. `services/api/tests/test_routing_contract.py` wires the API router's HTTP path to the **real** `hermes_agent` app and proves that with `AGENT_ROUTING_ENABLED=true` but `HERMES_AGENT_EXECUTION_ENABLED=false` the API sees `hermes_invoked=true` (HTTP hop succeeded) while the agent body reports `hermes_invoked=false` (no CLI ran).
+
+Commands (dry-run vs enabled routing):
+
+```bash
+# Dry-run stack + smoke (routing OFF; expects hermes_invoked=false)
+docker compose -f docker-compose.yml up -d --build
+docker compose -f docker-compose.yml -f docker-compose.smoke.yml \
+  run --rm -e SMOKE_EXPECT_ROUTING=false smoke
+
+# Enabled-routing stack + smoke (routing ON; expects hermes_invoked=true)
+docker compose -f docker-compose.yml -f docker-compose.override.routing.yml up -d --build
+docker compose -f docker-compose.yml -f docker-compose.override.routing.yml -f docker-compose.smoke.yml \
+  run --rm -e SMOKE_EXPECT_ROUTING=true smoke
+```
+
+Or via the Makefile: `make smoke-dry` and `make smoke-routing` (see `make help`).
+
+Environment (Phase 08 smoke): `SMOKE_API_BASE_URL`, `SMOKE_EXPECT_ROUTING`, `SMOKE_HERMES_HEALTH_URLS`, `SMOKE_ADMIN_PASSWORD`/`ADMIN_PASSWORD`, `SMOKE_QC_EMAIL`/`SMOKE_QC_USERNAME`/`SMOKE_QC_PASSWORD`, `SMOKE_HEALTH_RETRIES`, `SMOKE_HEALTH_INTERVAL`, `SMOKE_REQUEST_TIMEOUT`.
+
 ## Verify
 ```bash
 python -m pip install -r services/api/requirements-dev.txt
-pytest -q                       # runs services/api + services/hermes-agent tests
-python -m compileall services/api/app services/hermes-agent/hermes_agent
-docker compose config
-docker compose build hermes-er api
+pytest -q                       # runs services/api + services/hermes-agent + smoke unit tests
+python -m compileall services/api/app services/hermes-agent/hermes_agent scripts
+docker compose -f docker-compose.yml config                                   # default (dry-run) stack
+docker compose -f docker-compose.yml -f docker-compose.override.routing.yml -f docker-compose.smoke.yml config
+docker compose -f docker-compose.yml build hermes-er api
 ```
+Or use the Makefile: `make test`, `make compile`, `make compose-config`, `make compose-config-routing`, `make build`.
 
 Local seeded admin: `admin@example.com` / `ChangeMe123!`.
 
 ## Branching
 
-See `docs/BRANCHING.md`. Phase branches merge into `dev`; `main` remains the stable/default branch and is updated from `dev` only after all planned phases are complete.
+See `docs/BRANCHING.md`. Phase branches merge into `dev`; `main` remains the stable/default branch and is updated from `dev` only after all planned phases are complete. Phase 08 was implemented on `phase/08-routing-e2e-compose` and **leaves `main` unchanged**.

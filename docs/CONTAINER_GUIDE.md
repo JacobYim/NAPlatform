@@ -148,6 +148,59 @@ docker compose run --rm \
 환경변수: `HERMES_AGENT_EXECUTION_ENABLED`(기본 false), `HERMES_AGENT_EXECUTION_TIMEOUT_SECONDS`(기본 60),
 `HERMES_BIN`(기본 `hermes`), 그리고 기존 `DEPARTMENT`/`HERMES_PROFILE`/`API_BASE_URL`/`HDFS_NAMENODE`.
 
+## Routing E2E smoke (dry-run vs enabled) — Phase 08
+
+기본 `docker-compose.yml`은 항상 **dry-run**(`AGENT_ROUTING_ENABLED=false`)으로 안전하게 유지된다.
+routing을 켜려면 `-f`로만 로드되는 override 파일 `docker-compose.override.routing.yml`을 얹는다(평범한
+`docker compose up`에는 영향 없음). 이 override는 `api`의 flag만 `true`로 바꾸고 기존 `hermes-er/it/ehs/qc`
+서비스와 내부 URL(`http://hermes-<dep>:8080`)을 그대로 재사용한다.
+
+`scripts/smoke_routing_e2e.py`는 live 스택을 상대로 실행되는 E2E smoke이다: API와 각 Hermes agent의
+`/health`를 기다리고, seeded admin으로 로그인해 QC user를 **idempotent**하게 생성·승인하고, 그 user로
+`POST /agents/QC/chat`을 호출해 override가 켜졌을 땐 `hermes_invoked=true`, 기본 dry-run에선 `false`임을
+확인한다(그리고 `GET /admin/agents/status`의 `enabled`와 교차 검증). QC user가 IT에서 `403`으로 거부되는
+것도 확인한다. secret(비밀번호/세션 토큰)은 절대 출력하지 않으며 재실행에 안전하다.
+
+smoke는 내부 전용 agent(`hermes-*`, host port 없음)에 서비스 이름으로 접근해야 하므로, Compose 네트워크
+**안에서** 실행한다. `docker-compose.smoke.yml`이 API 이미지를 재사용하고 `./scripts`를 마운트하는 one-shot
+`smoke` 서비스(profile `smoke`)를 정의한다.
+
+```bash
+# Dry-run smoke (기본 스택, routing OFF → hermes_invoked=false 기대)
+docker compose -f docker-compose.yml up -d --build
+docker compose -f docker-compose.yml -f docker-compose.smoke.yml \
+  run --rm -e SMOKE_EXPECT_ROUTING=false smoke
+
+# Enabled-routing smoke (override 적용, routing ON → hermes_invoked=true 기대)
+docker compose -f docker-compose.yml -f docker-compose.override.routing.yml up -d --build
+docker compose -f docker-compose.yml -f docker-compose.override.routing.yml -f docker-compose.smoke.yml \
+  run --rm -e SMOKE_EXPECT_ROUTING=true smoke
+```
+
+Makefile 단축키: `make smoke-dry`, `make smoke-routing`(전체 목록은 `make help`).
+
+호스트에서 직접 스크립트를 돌릴 수도 있다(단, 내부 전용 agent에는 호스트에서 접근 불가하므로
+`SMOKE_HERMES_HEALTH_URLS`를 비워 두면 agent health 체크는 건너뛴다).
+
+```bash
+python -m pip install -r services/api/requirements-dev.txt
+SMOKE_API_BASE_URL=http://localhost:8080 SMOKE_EXPECT_ROUTING=false \
+  python scripts/smoke_routing_e2e.py
+```
+
+Agent 자체의 실제 Hermes CLI 실행을 켜려면 agent에 `HERMES_AGENT_EXECUTION_ENABLED=true`를 추가로 준다.
+override만 적용한 경우 API 레벨 HTTP 라우팅(`hermes_invoked=true`)은 켜지지만 agent는 여전히 결정적
+응답(agent body의 `hermes_invoked=false`)을 반환한다. 이 불변식은 `services/api/tests/test_routing_contract.py`가
+실제 hermes 앱을 상대로 증명한다.
+
+환경변수: `SMOKE_API_BASE_URL`(기본 `http://localhost:8080`), `SMOKE_EXPECT_ROUTING`(기본 false),
+`SMOKE_HERMES_HEALTH_URLS`(comma-separated), `SMOKE_ADMIN_PASSWORD`/`ADMIN_PASSWORD`,
+`SMOKE_QC_EMAIL`/`SMOKE_QC_USERNAME`/`SMOKE_QC_PASSWORD`, `SMOKE_HEALTH_RETRIES`(기본 30),
+`SMOKE_HEALTH_INTERVAL`(기본 2s), `SMOKE_REQUEST_TIMEOUT`(기본 30s).
+
+**Branch policy:** Phase 08은 `phase/08-routing-e2e-compose`에서 작업하며 `main`은 건드리지 않는다
+(`docs/BRANCHING.md`).
+
 ## Separate core-webui UI
 ```bash
 CORE_WEBUI_CONTEXT=../core-webui docker compose up -d ui
