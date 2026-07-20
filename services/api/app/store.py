@@ -141,10 +141,31 @@ class Store:
             s.commit()
 
     def list_audit_events(self, limit: int = 100) -> list[AuditEvent]:
+        return self.export_audit_events(limit=limit)
+
+    def export_audit_events(self, *, limit: int = 100, action: str | None = None,
+                            actor: str | None = None, user_id: str | None = None,
+                            success: bool | None = None) -> list[AuditEvent]:
+        """Filtered, newest-first audit export (Phase 12).
+
+        Read-only: this never mutates or deletes rows. Filters are optional and
+        combined with AND; ``limit`` bounds the result set. Audit rows carry no
+        secret material (no password hashes), so the export is safe to hand to an
+        admin verbatim.
+        """
         with self._Session() as s:
-            rows = s.scalars(
-                select(AuditEventRow).order_by(AuditEventRow.created_at.desc(),
-                                               AuditEventRow.id.desc()).limit(limit)).all()
+            stmt = select(AuditEventRow)
+            if action is not None:
+                stmt = stmt.where(AuditEventRow.action == action)
+            if actor is not None:
+                stmt = stmt.where(AuditEventRow.actor == actor)
+            if user_id is not None:
+                stmt = stmt.where(AuditEventRow.user_id == user_id)
+            if success is not None:
+                stmt = stmt.where(AuditEventRow.success == success)
+            stmt = stmt.order_by(AuditEventRow.created_at.desc(),
+                                 AuditEventRow.id.desc()).limit(limit)
+            rows = s.scalars(stmt).all()
             return [AuditEvent(id=r.id, action=r.action, user_id=r.user_id,
                                actor=r.actor, success=r.success, detail=r.detail,
                                created_at=r.created_at) for r in rows]

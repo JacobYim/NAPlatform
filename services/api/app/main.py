@@ -1,6 +1,9 @@
+import json
 import os
 from uuid import uuid4
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 from .models import AgentContext, AdminUserUpdate, AuditEvent, ChatRequest, ChatResponse, CoreWebUILaunchConfig, DepartmentOptionsResponse, GraphNode, GraphNodeInsertRequest, GraphNodeInsertResponse, GraphNodeSearchRequest, GraphNodeSearchResponse, HdfsCheckRequest, HdfsProvisionReport, LoginRequest, LogoutResponse, PendingApproval, ResourceListResponse, SelectDepartmentRequest, SelectedDepartmentResponse, SessionBootstrapResponse, SessionStatusResponse, SignupRequest, User, UserStatus, VectorInsertRequest, VectorInsertResponse, VectorRecord, VectorSearchRequest, VectorSearchResponse, WorkspaceHdfsResponse
 from .hdfs import HdfsProvisioner, ProvisioningError, backend_status as hdfs_backend_status
 from .rbac import AccessDenied, allowed_hdfs_roots, allowed_mcp_servers, allowed_tools, assert_hdfs_path_allowed, neo4j_filter, normalize_department, qdrant_filter
@@ -8,9 +11,23 @@ from .vector import VectorScopeError, vector_adapter
 from .graph import GraphScopeError, graph_adapter
 from .agent_router import AgentTimeout, AgentUpstreamError, AgentError, agent_router
 from .security import hash_password, verify_password
-from . import webui
+from . import config, webui
 from .store import store
-app=FastAPI(title="NAPlatform API",version="0.1.0"); store.seed_admin(password=os.environ.get("ADMIN_PASSWORD","ChangeMe123!"))
+app=FastAPI(title="NAPlatform API",version="0.1.0"); store.seed_admin(password=os.environ.get("ADMIN_PASSWORD",config.DEFAULT_ADMIN_PASSWORD))
+# Phase 12: CORS trusted-origin allow-list (safe dev defaults; TRUSTED_ORIGINS in
+# production). Credentials are allowed only for a concrete origin list — never for
+# a bare wildcard, which browsers reject with credentials anyway.
+_ORIGINS=config.trusted_origins()
+app.add_middleware(CORSMiddleware,allow_origins=_ORIGINS,allow_credentials="*" not in _ORIGINS,allow_methods=["*"],allow_headers=["*"])
+# Phase 12: baseline security headers on every response. HSTS is added only in
+# production (it is meaningless/harmful over plain-HTTP local dev).
+SECURITY_HEADERS={"X-Content-Type-Options":"nosniff","X-Frame-Options":"DENY","Referrer-Policy":"no-referrer","Cross-Origin-Opener-Policy":"same-origin"}
+@app.middleware("http")
+async def security_headers(request:Request,call_next):
+    resp=await call_next(request)
+    for k,v in SECURITY_HEADERS.items(): resp.headers.setdefault(k,v)
+    if config.production_mode(): resp.headers.setdefault("Strict-Transport-Security","max-age=63072000; includeSubDomains")
+    return resp
 def bearer_token(authorization:str|None=Header(default=None))->str:
     if not authorization or not authorization.startswith("Bearer "): raise HTTPException(401,"missing bearer token")
     return authorization.removeprefix("Bearer ").strip()
@@ -69,6 +86,24 @@ def update_user(user_id:str, update:AdminUserUpdate, admin:User=Depends(require_
     return u.model_dump(exclude={'password_hash'})
 @app.get('/admin/audit',response_model=list[AuditEvent])
 def audit(limit:int=100,_:User=Depends(require_admin)): return store.list_audit_events(limit=limit)
+@app.get('/admin/audit/export')
+def audit_export(limit:int=Query(default=1000,ge=1,le=10000),action:str|None=None,actor:str|None=None,user_id:str|None=None,success:bool|None=None,format:str=Query(default="json",pattern="^(json|jsonl)$"),admin:User=Depends(require_admin)):
+    # Phase 12: admin-only, read-only audit export with optional filters. Returns
+    # structured records (default) or JSON-lines (?format=jsonl). Retention is
+    # advisory (documented, non-destructive) — this endpoint never deletes rows.
+    events=store.export_audit_events(limit=limit,action=action,actor=actor,user_id=user_id,success=success)
+    records=[e.model_dump(mode="json") for e in events]
+    store.add_audit_event("audit_export",user_id=admin.id,actor=admin.email,success=True,detail=f"count={len(records)} action={action} actor={actor} format={format}")
+    if format=="jsonl":
+        body="\n".join(json.dumps(r,default=str) for r in records)
+        return PlainTextResponse(body,media_type="application/x-ndjson")
+    return {"count":len(records),"filters":{"action":action,"actor":actor,"user_id":user_id,"success":success,"limit":limit},"retention":config.retention_policy(),"events":records}
+@app.get('/admin/release/readiness')
+def release_readiness(_:User=Depends(require_admin)):
+    # Phase 12: admin-only, redacted production-readiness + final release checklist.
+    # Purely informational — it never promotes `main` and leaks no secrets (checks
+    # report booleans / redacted URLs only).
+    return config.release_checklist_status()
 def build_agent_context(user:User,department:str)->AgentContext:
     dep=normalize_department(department)
     return AgentContext(user_id=user.id,username=user.username,department=dep,hdfs_roots=allowed_hdfs_roots(user,dep),qdrant_filter=qdrant_filter(user,dep),neo4j_filter=neo4j_filter(user,dep),allowed_tools=allowed_tools(user,dep),allowed_mcp_servers=allowed_mcp_servers(user,dep))
