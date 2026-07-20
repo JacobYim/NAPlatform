@@ -1,18 +1,21 @@
 import os
 from uuid import uuid4
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
-from .models import AgentContext, AdminUserUpdate, AuditEvent, ChatRequest, ChatResponse, CoreWebUILaunchConfig, GraphNode, GraphNodeInsertRequest, GraphNodeInsertResponse, GraphNodeSearchRequest, GraphNodeSearchResponse, HdfsCheckRequest, HdfsProvisionReport, LoginRequest, PendingApproval, ResourceListResponse, SessionBootstrapResponse, SignupRequest, User, UserStatus, VectorInsertRequest, VectorInsertResponse, VectorRecord, VectorSearchRequest, VectorSearchResponse, WorkspaceHdfsResponse
+from .models import AgentContext, AdminUserUpdate, AuditEvent, ChatRequest, ChatResponse, CoreWebUILaunchConfig, DepartmentOptionsResponse, GraphNode, GraphNodeInsertRequest, GraphNodeInsertResponse, GraphNodeSearchRequest, GraphNodeSearchResponse, HdfsCheckRequest, HdfsProvisionReport, LoginRequest, LogoutResponse, PendingApproval, ResourceListResponse, SelectDepartmentRequest, SelectedDepartmentResponse, SessionBootstrapResponse, SessionStatusResponse, SignupRequest, User, UserStatus, VectorInsertRequest, VectorInsertResponse, VectorRecord, VectorSearchRequest, VectorSearchResponse, WorkspaceHdfsResponse
 from .hdfs import HdfsProvisioner, ProvisioningError, backend_status as hdfs_backend_status
 from .rbac import AccessDenied, allowed_hdfs_roots, allowed_mcp_servers, allowed_tools, assert_hdfs_path_allowed, neo4j_filter, normalize_department, qdrant_filter
 from .vector import VectorScopeError, vector_adapter
 from .graph import GraphScopeError, graph_adapter
 from .agent_router import AgentTimeout, AgentUpstreamError, AgentError, agent_router
 from .security import hash_password, verify_password
+from . import webui
 from .store import store
 app=FastAPI(title="NAPlatform API",version="0.1.0"); store.seed_admin(password=os.environ.get("ADMIN_PASSWORD","ChangeMe123!"))
-def current_user(authorization:str|None=Header(default=None))->User:
+def bearer_token(authorization:str|None=Header(default=None))->str:
     if not authorization or not authorization.startswith("Bearer "): raise HTTPException(401,"missing bearer token")
-    u=store.get_session_user(authorization.removeprefix("Bearer ").strip())
+    return authorization.removeprefix("Bearer ").strip()
+def current_user(token:str=Depends(bearer_token))->User:
+    u=store.get_session_user(token)
     if not u: raise HTTPException(401,"invalid session")
     return u
 def require_active(user:User=Depends(current_user))->User:
@@ -37,6 +40,19 @@ def login(req:LoginRequest):
     if u.status!=UserStatus.active: store.add_audit_event("login",user_id=u.id,actor=u.email,success=False,detail="user is not active"); raise HTTPException(403,"user is not active")
     store.add_audit_event("login",user_id=u.id,actor=u.email,success=True)
     return {"token":store.create_session(u.id),"user_id":u.id,"is_admin":u.is_admin}
+@app.post('/auth/logout',response_model=LogoutResponse)
+def logout(token:str=Depends(bearer_token)):
+    # Phase 11: invalidate the session in Redis/memory (idempotent safe logout).
+    # Any bearer token is accepted; an unknown/expired token is a no-op that still
+    # reports success so the UI can clear its local state. A real session is audited.
+    u=store.get_session_user(token); store.delete_session(token)
+    if u: store.add_audit_event("logout",user_id=u.id,actor=u.email,success=True)
+    return LogoutResponse(message="logged out",invalidated=bool(u))
+@app.get('/auth/departments/options',response_model=DepartmentOptionsResponse)
+def departments_options():
+    # Public: the signup / department-selector dropdown needs the option list
+    # before a session exists. No secrets, no per-user data.
+    return DepartmentOptionsResponse(departments=webui.department_options())
 @app.post('/auth/password-reset/request')
 def password_reset(email:str):
     u=store.get_user_by_email(email)
@@ -62,10 +78,40 @@ def core_webui_config()->CoreWebUILaunchConfig:
 def context(department:str,user:User=Depends(require_active)):
     try: return build_agent_context(user,department)
     except (AccessDenied,ValueError) as e: raise HTTPException(403,str(e))
+def build_session_bootstrap(user:User)->SessionBootstrapResponse:
+    # Phase 11: the session bootstrap model the core-webui adapter consumes. It
+    # carries the department routes so the UI can route chat to
+    # /agents/{department}/chat, plus the approval-waiting UX contract.
+    deps=[normalize_department(d) for d in user.departments]
+    return SessionBootstrapResponse(user_id=user.id,username=user.username,email=user.email,is_admin=user.is_admin,status=user.status,departments=deps,default_department=deps[0] if deps else None,core_webui=core_webui_config(),session_status=user.status.value,department_routes=webui.user_department_routes(user),approval=webui.approval_ux(user))
 @app.get('/core-webui/session',response_model=SessionBootstrapResponse)
 def core_webui_session(user:User=Depends(require_active)):
-    deps=[normalize_department(d) for d in user.departments]
-    return SessionBootstrapResponse(user_id=user.id,username=user.username,email=user.email,is_admin=user.is_admin,status=user.status,departments=deps,default_department=deps[0] if deps else None,core_webui=core_webui_config())
+    return build_session_bootstrap(user)
+@app.get('/auth/me',response_model=SessionBootstrapResponse)
+def auth_me(user:User=Depends(require_active)):
+    # Alias for /core-webui/session: same bootstrap shape under an auth-namespaced
+    # path the adapter can use interchangeably. Preserves the existing contract.
+    return build_session_bootstrap(user)
+@app.get('/core-webui/session/status',response_model=SessionStatusResponse)
+def core_webui_session_status(user:User=Depends(current_user)):
+    # Unlike /core-webui/session (active-only, 403 for pending), this resolves for
+    # any valid session and reports status so the UI can render the approval-
+    # waiting screen for a pending/disabled account. An expired/invalid session is
+    # still 401 (via current_user), which the UI treats as "logged out".
+    ux=webui.approval_ux(user)
+    return SessionStatusResponse(user_id=user.id,username=user.username,email=user.email,is_admin=user.is_admin,status=user.status,can_access=bool(ux["can_access"]),pending=user.status==UserStatus.pending,approval=ux,departments=[normalize_department(d) for d in user.departments])
+@app.post('/core-webui/session/select-department',response_model=SelectedDepartmentResponse)
+def core_webui_select_department(req:SelectDepartmentRequest,user:User=Depends(require_active)):
+    # Validate the department the UI selected for the session and return its chat/
+    # context/resource routes. A non-member is denied (403); an unknown department
+    # is a bad request (400). Admins may select any department.
+    try: route=webui.assert_department_selectable(user,req.department)
+    except AccessDenied as e:
+        store.add_audit_event("department_select",user_id=user.id,actor=user.email,success=False,detail=str(e)); raise HTTPException(403,str(e))
+    except ValueError as e:
+        store.add_audit_event("department_select",user_id=user.id,actor=user.email,success=False,detail=str(e)); raise HTTPException(400,str(e))
+    store.add_audit_event("department_select",user_id=user.id,actor=user.email,success=True,detail=f"department={route.department}")
+    return SelectedDepartmentResponse(department=route.department,is_member=True,route=route)
 @app.post('/agents/{department}/chat',response_model=ChatResponse)
 def agent_chat(department:str,req:ChatRequest,user:User=Depends(require_active)):
     try: ctx=build_agent_context(user,department)

@@ -1,0 +1,86 @@
+{
+  "$comment": "Phase 11 core-webui auth/session adapter contract. This is the single source of truth the JS adapter (naplatform-adapter.js) and the Python contract test (services/api/tests/test_webui_adapter_contract.py) both read, so the frontend adapter and the FastAPI API can never silently drift. It contains NO secrets — only endpoint shapes.",
+  "name": "naplatform-core-webui-adapter",
+  "version": "0.1.0",
+  "api_base_url_env": "NAPLATFORM_API_BASE_URL",
+  "auth_scheme": "Bearer <session-token>",
+  "endpoints": [
+    {
+      "name": "signup",
+      "method": "POST",
+      "path": "/auth/signup",
+      "auth": "none",
+      "request_fields": ["email", "username", "password", "department"],
+      "response_fields": ["id", "status", "message"],
+      "notes": "New users start pending; admin approval is required before login."
+    },
+    {
+      "name": "login",
+      "method": "POST",
+      "path": "/auth/login",
+      "auth": "none",
+      "request_fields": ["email", "password"],
+      "response_fields": ["token", "user_id", "is_admin"],
+      "notes": "Pending/disabled accounts are rejected with 403; the adapter routes those to the approval-waiting UX."
+    },
+    {
+      "name": "logout",
+      "method": "POST",
+      "path": "/auth/logout",
+      "auth": "session",
+      "response_fields": ["message", "invalidated"],
+      "notes": "Invalidates the Redis/memory session. Idempotent: an unknown/expired token still returns 200."
+    },
+    {
+      "name": "departmentOptions",
+      "method": "GET",
+      "path": "/auth/departments/options",
+      "auth": "none",
+      "response_fields": ["departments"],
+      "notes": "Public option list for the signup / department-selector dropdown."
+    },
+    {
+      "name": "me",
+      "method": "GET",
+      "path": "/auth/me",
+      "auth": "active",
+      "response_fields": ["user_id", "username", "email", "is_admin", "status", "departments", "default_department", "core_webui", "department_routes", "approval"],
+      "notes": "Alias of /core-webui/session with the same bootstrap shape."
+    },
+    {
+      "name": "session",
+      "method": "GET",
+      "path": "/core-webui/session",
+      "auth": "active",
+      "response_fields": ["user_id", "username", "email", "is_admin", "status", "departments", "default_department", "core_webui", "department_routes", "approval"],
+      "notes": "Active-only bootstrap; a pending/disabled session is 403 here — call sessionStatus instead."
+    },
+    {
+      "name": "sessionStatus",
+      "method": "GET",
+      "path": "/core-webui/session/status",
+      "auth": "session",
+      "response_fields": ["user_id", "username", "email", "is_admin", "status", "can_access", "pending", "approval", "departments"],
+      "notes": "Resolves for any valid session and reports status so the UI can render the approval-waiting screen. 401 for an expired/invalid session."
+    },
+    {
+      "name": "selectDepartment",
+      "method": "POST",
+      "path": "/core-webui/session/select-department",
+      "auth": "active",
+      "request_fields": ["department"],
+      "response_fields": ["department", "is_member", "route"],
+      "notes": "Validates department membership and returns the chat/context/resource routes. Non-member -> 403, unknown department -> 400."
+    },
+    {
+      "name": "chat",
+      "method": "POST",
+      "path": "/agents/{department}/chat",
+      "auth": "active",
+      "path_params": ["department"],
+      "request_fields": ["message", "session_id"],
+      "response_fields": ["department", "user_id", "username", "reply", "hermes_invoked", "request_id"],
+      "notes": "Route obtained from department_routes[].chat_route in the session bootstrap."
+    }
+  ]
+}

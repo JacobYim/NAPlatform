@@ -303,3 +303,46 @@ VECTOR_BACKEND=memory|qdrant   GRAPH_BACKEND=memory|neo4j   HDFS_PROVISIONING_EN
 `/vector/{department}`·`/graph/{department}` API 계약은 불변이며, env가 선택한 백엔드를 사용하되
 기본은 memory다. 기본 스택은 memory/dry-run이며 `main`은 변경하지 않는다(Phase 10은
 `phase/10-real-backend-adapters`에서 작업; `docs/BRANCHING.md`, `docs/ROADMAP.md`).
+
+## Phase 11 — core-webui auth/session UI integration adapter (테스트에 live UI 불필요)
+
+로그인 이후 실제 UI는 외부 저장소 `github.com/JacobYim/core-webui`이며 이 repo에 vendor하지
+않는다. Phase 11은 그 UI의 login/signup/session/부서 선택 흐름을 NAPlatform API에 연결하는
+**repo가 소유한 adapter**를 추가하여, 브라우저나 외부 체크아웃 없이 통합을 여기서 테스트한다.
+핵심 설계는 **API가 보안 경계**이고 adapter는 그 RBAC 결과(pending→승인 대기 UX, 비-member
+부서→거부)를 UX로 반영만 할 뿐 접근 결정을 내리지 않는다는 것이다.
+
+```
+Browser (core-webui)
+   │  services/ui/adapter/naplatform-adapter.js  (ES module, in-memory token)
+   ▼
+POST /auth/signup ─▶ pending          GET /auth/departments/options (public)
+POST /auth/login  ─▶ token(active) / 403(pending·disabled)
+GET  /auth/me  ≡  GET /core-webui/session ─▶ bootstrap + department_routes[] + approval
+GET  /core-webui/session/status ─▶ any valid session: can_access + approval  (401 if expired)
+POST /core-webui/session/select-department ─▶ route  (403 non-member / 400 unknown)
+POST /auth/logout ─▶ Redis/memory 세션 무효화 (idempotent)
+```
+
+- **Adapter 패키지 (`services/ui/adapter/`)** — 의존성 없는 ES module
+  (`naplatform-adapter.js`), 계약의 단일 소스인 `contract.json`(JS adapter와 Python
+  테스트가 함께 읽어 drift 방지), 정적 `index.html` 데모, `package.json`, `README.md`.
+  세션 토큰은 메모리에만 있고 어떤 adapter 파일에도 secret이 embed되지 않는다(테스트가 강제).
+- **API 지원 endpoint(기존 계약 보존, 추가만)** — `GET /auth/me`(`/core-webui/session`
+  alias), `GET /auth/departments/options`(public), `POST /auth/logout`(세션 무효화),
+  `GET /core-webui/session/status`(모든 유효 세션의 상태 → 승인 대기 UX; 만료/무효 세션은 `401`),
+  `POST /core-webui/session/select-department`(부서 membership 검증 후 chat/context/resource
+  route 반환; 비-member `403`, unknown `400`).
+- **세션 부트스트랩 모델 (`app/webui.py`)** — 부서 route(그래서 UI가 chat을
+  `/agents/{department}/chat`로 라우팅), public 부서 옵션, 승인 대기 UX 계약을 만드는 순수
+  helper. `/core-webui/session`·`/auth/me` 응답에 `session_status`, `chat_route_template`,
+  `department_routes[]`, `approval`이 **추가**된다(기존 소비자는 무시).
+- **pending/inactive 처리** — 신규 signup은 `pending`이라 로그인 불가(`403`); 로그인 후 권한이
+  회수되면 `/core-webui/session`은 `403`이지만 `/core-webui/session/status`는 `can_access:false`
+  승인 계약을 반환; 만료/무효 세션은 어디서나 `401`.
+
+pytest 커버리지: `test_webui_session.py`(login 성공, pending 로그인 차단 + 승인 대기 status,
+부서 옵션, logout 무효화, member/비-member 부서 선택, `/auth/me` alias, 만료 세션 401),
+`test_webui_adapter_contract.py`(`contract.json`의 모든 endpoint가 올바른 method/응답 형태로 앱에
+존재, JS adapter가 모든 contract path를 참조, adapter 파일에 token/secret 미유출). 기본 스택과
+`main`은 불변이다(Phase 11은 `phase/11-core-webui-auth-session-integration`에서 작업).

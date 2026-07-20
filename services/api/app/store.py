@@ -102,6 +102,10 @@ class Store:
         user_id = self.sessions.get(token)
         return self.get_user(user_id) if user_id else None
 
+    def delete_session(self, token: str) -> None:
+        """Invalidate a session token (Redis or in-memory). Idempotent."""
+        self.sessions.delete(token)
+
     # --- password reset tokens --------------------------------------------
     def create_reset_token(self, user_id: str,
                            ttl_seconds: int = RESET_TOKEN_TTL_SECONDS) -> str:

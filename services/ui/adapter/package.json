@@ -1,0 +1,22 @@
+{
+  "name": "naplatform-core-webui-adapter",
+  "version": "0.1.0",
+  "description": "Dependency-free browser adapter connecting core-webui login/signup/session/department-selector flows to the NAPlatform API (Phase 11).",
+  "type": "module",
+  "main": "naplatform-adapter.js",
+  "exports": {
+    ".": "./naplatform-adapter.js",
+    "./contract": "./contract.json"
+  },
+  "files": [
+    "naplatform-adapter.js",
+    "contract.json",
+    "index.html",
+    "README.md"
+  ],
+  "scripts": {
+    "contract-test": "python -m pytest ../../api/tests/test_webui_adapter_contract.py -q"
+  },
+  "license": "UNLICENSED",
+  "private": true
+}

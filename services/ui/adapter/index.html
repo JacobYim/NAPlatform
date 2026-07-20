@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NAPlatform core-webui adapter demo</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 42rem; margin: 2rem auto; padding: 0 1rem; }
+    fieldset { margin-bottom: 1rem; }
+    label { display: block; margin: 0.25rem 0; }
+    input, select, button { font: inherit; padding: 0.35rem; }
+    pre { background: #f4f4f4; padding: 0.75rem; overflow: auto; }
+    .muted { color: #666; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>NAPlatform core-webui adapter</h1>
+  <p class="muted">
+    Static demo of the Phase 11 auth/session adapter. It calls the NAPlatform API
+    (signup / login / session / department selector / logout). No credentials are
+    embedded — type your own. Set the API base URL to your running API.
+  </p>
+
+  <fieldset>
+    <legend>API</legend>
+    <label>Base URL <input id="baseUrl" size="32" value="http://localhost:8080" /></label>
+    <button id="loadDepts">Load department options</button>
+  </fieldset>
+
+  <fieldset>
+    <legend>Sign up (pending admin approval)</legend>
+    <label>Email <input id="suEmail" type="email" placeholder="you@example.com" /></label>
+    <label>Username <input id="suUser" placeholder="yourname" /></label>
+    <label>Password <input id="suPass" type="password" placeholder="(min 8 chars)" /></label>
+    <label>Department <select id="suDept"></select></label>
+    <button id="signupBtn">Sign up</button>
+  </fieldset>
+
+  <fieldset>
+    <legend>Log in</legend>
+    <label>Email <input id="liEmail" type="email" placeholder="you@example.com" /></label>
+    <label>Password <input id="liPass" type="password" /></label>
+    <button id="loginBtn">Log in</button>
+    <button id="statusBtn">Session status</button>
+    <button id="logoutBtn">Log out</button>
+  </fieldset>
+
+  <fieldset>
+    <legend>Department + chat</legend>
+    <label>Department <select id="chatDept"></select></label>
+    <label>Message <input id="chatMsg" placeholder="hello" /></label>
+    <button id="selectBtn">Select department</button>
+    <button id="chatBtn">Send chat</button>
+  </fieldset>
+
+  <h3>Output</h3>
+  <pre id="out">(nothing yet)</pre>
+
+  <script type="module">
+    import { NAPlatformAdapter } from "./naplatform-adapter.js";
+
+    const out = document.getElementById("out");
+    const show = (v) => { out.textContent = typeof v === "string" ? v : JSON.stringify(v, null, 2); };
+    const wrap = (fn) => async () => { try { show(await fn()); } catch (e) { show(`${e.name}: ${e.message} (status ${e.status ?? "?"})`); } };
+
+    let adapter = new NAPlatformAdapter({ baseUrl: document.getElementById("baseUrl").value });
+    document.getElementById("baseUrl").addEventListener("change", (e) => {
+      adapter = new NAPlatformAdapter({ baseUrl: e.target.value });
+    });
+
+    function fillDeptSelects(options) {
+      for (const id of ["suDept", "chatDept"]) {
+        const sel = document.getElementById(id);
+        sel.innerHTML = "";
+        for (const o of options) {
+          const opt = document.createElement("option");
+          opt.value = o.value; opt.textContent = `${o.label} (${o.value})`;
+          sel.appendChild(opt);
+        }
+      }
+    }
+
+    document.getElementById("loadDepts").onclick = wrap(async () => {
+      const data = await adapter.departmentOptions();
+      fillDeptSelects(data.departments || []);
+      return data;
+    });
+
+    document.getElementById("signupBtn").onclick = wrap(() => adapter.signup({
+      email: suEmail.value, username: suUser.value, password: suPass.value, department: suDept.value,
+    }));
+
+    document.getElementById("loginBtn").onclick = wrap(async () => {
+      const data = await adapter.login({ email: liEmail.value, password: liPass.value });
+      const status = await adapter.sessionStatus();
+      return { login: data, ux: NAPlatformAdapter.uxForStatus(status) };
+    });
+
+    document.getElementById("statusBtn").onclick = wrap(async () => {
+      const status = await adapter.sessionStatus();
+      return { status, ux: NAPlatformAdapter.uxForStatus(status) };
+    });
+
+    document.getElementById("logoutBtn").onclick = wrap(() => adapter.logout());
+    document.getElementById("selectBtn").onclick = wrap(() => adapter.selectDepartment(chatDept.value));
+    document.getElementById("chatBtn").onclick = wrap(() => adapter.chat(chatDept.value, chatMsg.value));
+  </script>
+</body>
+</html>
