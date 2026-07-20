@@ -370,3 +370,40 @@ docker network create naplatform_net
 docker run -d --name nap-redis --network naplatform_net redis:7-alpine
 docker run -d --name hermes-er --network naplatform_net -e DEPARTMENT=ER -e HERMES_PROFILE=ER naplatform-hermes-agent:local
 ```
+
+## Phase 12 — Production hardening & release prep
+
+기본 스택은 그대로 permissive(memory/dry-run, SQLite, in-memory 세션)하게 유지되고, 프로덕션
+설정은 `.env.production.example`에 전부 문서화되어 있다(실제 secret 없음). readiness 게이트는
+`PRODUCTION_MODE=true`일 때만 필수 체크를 강제한다.
+
+```bash
+# 프로덕션 env 템플릿을 복사해 실제 값으로 채운다(.env.production 은 git-ignore).
+cp .env.production.example .env.production
+
+# redacted 프로덕션 readiness 리포트(booleans + redacted URL만; secret 없음)
+make readiness
+
+# 릴리스 게이트: pytest + compile + compose config + readiness 게이트 (main 미변경)
+make release-check
+PRODUCTION_MODE=true make release-check     # 프로덕션 env로 필수 체크 강제
+
+# 프로덕션 env 템플릿을 적용한 compose config 검증
+make compose-config-prod
+docker compose --env-file .env.production.example -f docker-compose.yml config
+
+# 최종 스모크(도커 필요): dry-run + enabled-routing
+make smoke-final
+
+# 실행 중 API에서 admin 전용 readiness / 감사 export (secret 미노출)
+curl -s http://localhost:8080/admin/release/readiness -H "Authorization: Bearer <ADMIN_TOKEN>" | jq .
+curl -s "http://localhost:8080/admin/audit/export?action=login&limit=100&format=jsonl" \
+  -H "Authorization: Bearer <ADMIN_TOKEN>"
+```
+
+Phase 12 환경변수: `PRODUCTION_MODE`, `TRUSTED_ORIGINS`, `SESSION_STORE_STRICT`,
+`AUDIT_RETENTION_DAYS`, `AUDIT_RETENTION_ENFORCE`. 릴리스 절차는
+`docs/FINAL_RELEASE_CHECKLIST.md`, 릴리스 노트는 `docs/RELEASE_NOTES_TEMPLATE.md` 참고.
+
+**Branch policy:** Phase 12는 `phase/12-production-hardening-release-prep`에서 작업하며 `main`은
+건드리지 않는다. `main`은 명시적 승인 후 `make release-dev-to-main`에서만 갱신된다.

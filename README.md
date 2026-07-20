@@ -211,6 +211,54 @@ curl -s -X POST localhost:8080/auth/logout -H "Authorization: Bearer $TOKEN" | j
 Tests: `services/api/tests/test_webui_session.py` and
 `services/api/tests/test_webui_adapter_contract.py` (no Docker, no browser).
 
+## Phase 12 — Production hardening & release prep (main stays stable)
+
+Phase 12 hardens the API for a real deployment and prepares the stable release,
+**without touching `main`** and **without changing the permissive defaults** (dev
+still runs memory/dry-run, SQLite, in-memory sessions, and never blocks startup):
+
+- **Production env template (`.env.production.example`)** — documents every
+  production setting (secrets, CORS/`TRUSTED_ORIGINS`, backend modes, routing
+  flags, Redis/Postgres/Qdrant/Neo4j/HDFS/Hermes URLs) with dummy placeholders.
+  No real secrets.
+- **Runtime config validation (`app/config.py`)** — `readiness_report()` is
+  permissive in dev and, when `PRODUCTION_MODE=true`, requires a non-default
+  `ADMIN_PASSWORD`, a durable `DATABASE_URL`, `REDIS_URL` **or**
+  `SESSION_STORE_STRICT`, concrete `TRUSTED_ORIGINS` (no `*`), `QDRANT_URL` when
+  `VECTOR_BACKEND=qdrant`, `NEO4J_URI`/`NEO4J_USER`/`NEO4J_PASSWORD` when
+  `GRAPH_BACKEND=neo4j`, and a `HERMES_{DEP}_URL` when `AGENT_ROUTING_ENABLED=true`.
+  The report is redacted — booleans and redacted URLs only.
+- **`GET /admin/release/readiness`** (admin-only) — redacted readiness checks +
+  the final release checklist status. Never promotes `main`.
+- **CORS + security headers** — a configurable `TRUSTED_ORIGINS` allow-list
+  (safe localhost dev defaults, credentials off for a wildcard) and baseline
+  headers (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`,
+  `Cross-Origin-Opener-Policy`; HSTS only in production).
+- **`GET /admin/audit/export`** (admin-only) — read-only audit export with
+  `action`/`actor`/`user_id`/`success`/`limit` filters and `format=json|jsonl`.
+  Retention is documented and **non-destructive by default** (`AUDIT_RETENTION_DAYS`,
+  `AUDIT_RETENTION_ENFORCE=false`).
+- **Release docs + Makefile** — `docs/RELEASE_NOTES_TEMPLATE.md`,
+  `docs/FINAL_RELEASE_CHECKLIST.md`, and `make release-check` (pytest + compile +
+  compose config + readiness gate; **never updates `main`**), `make
+  compose-config-prod`, `make smoke-final`.
+
+Environment (Phase 12): `PRODUCTION_MODE`, `TRUSTED_ORIGINS`, `SESSION_STORE_STRICT`,
+`AUDIT_RETENTION_DAYS`, `AUDIT_RETENTION_ENFORCE` (plus the datastore/backend/routing
+envs from Phases 03–10).
+
+```bash
+make readiness                 # redacted production-readiness report
+make release-check             # pytest + compile + compose config + readiness gate (main untouched)
+PRODUCTION_MODE=true make release-check   # enforce required checks with the prod env
+make compose-config-prod       # compose config with .env.production.example applied
+curl -s localhost:8080/admin/release/readiness -H "Authorization: Bearer $ADMIN_TOKEN" | jq .
+```
+
+`main` moves **only** at `make release-dev-to-main`, and only after explicit
+approval — see `docs/FINAL_RELEASE_CHECKLIST.md`. Phase 12 is implemented on
+`phase/12-production-hardening-release-prep` and **leaves `main` unchanged**.
+
 ## Verify
 ```bash
 python -m pip install -r services/api/requirements-dev.txt

@@ -3,4 +3,5 @@ __pycache__/
 .pytest_cache/
 *.pyc
 .env
+.env.production
 node_modules/

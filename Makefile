@@ -26,10 +26,15 @@ GIT_REMOTE         ?= origin
 # to run the Phase 09 resource script instead of the Phase 08 routing script.
 RESOURCE_CMD       := python /scripts/smoke_resources_e2e.py
 
-.PHONY: help test smoke-unit compile compose-config compose-config-routing build \
+.PHONY: help test smoke-unit compile compose-config compose-config-routing \
+        compose-config-prod build \
         up up-routing down smoke-dry smoke-routing smoke-resources \
-        smoke-all-dry-run smoke-all-routing \
+        smoke-all-dry-run smoke-all-routing smoke-final \
+        readiness release-check \
         push-phase merge-phase-to-dev release-dev-to-main
+
+# Phase 12: production env template consumed by the prod compose config check.
+PROD_ENV_FILE      ?= .env.production.example
 
 help:
 	@echo "Host-side checks (no Docker):"
@@ -38,7 +43,13 @@ help:
 	@echo "  compile            - byte-compile api, hermes-agent, and scripts"
 	@echo "  compose-config     - validate the default (dry-run) Compose config"
 	@echo "  compose-config-routing - validate the enabled-routing Compose config"
+	@echo "  compose-config-prod- validate Compose config against the prod env template"
 	@echo "  build              - build the api and hermes-agent images"
+	@echo ""
+	@echo "Release preparation (Phase 12; never touches main):"
+	@echo "  readiness          - print the redacted production-readiness report"
+	@echo "  release-check      - pytest + compile + compose config + readiness gate (main untouched)"
+	@echo "  smoke-final        - full smoke: dry-run + enabled-routing (needs Docker)"
 	@echo ""
 	@echo "Stack lifecycle:"
 	@echo "  up                 - start the default stack (dry-run, routing OFF)"
@@ -73,6 +84,11 @@ compose-config:
 
 compose-config-routing:
 	$(COMPOSE) $(BASE) $(ROUTING) $(SMOKE) config
+
+# Validate the default compose topology with the production env template applied,
+# so the prod-oriented variable substitution is exercised. Non-destructive.
+compose-config-prod:
+	$(COMPOSE) --env-file $(PROD_ENV_FILE) $(BASE) config
 
 build:
 	$(COMPOSE) $(BASE) build api hermes-er
@@ -111,6 +127,26 @@ smoke-all-dry-run:
 smoke-all-routing:
 	$(COMPOSE) $(BASE) $(ROUTING) $(SMOKE) run --rm -e SMOKE_EXPECT_ROUTING=true smoke
 	$(COMPOSE) $(BASE) $(ROUTING) $(SMOKE) run --rm smoke $(RESOURCE_CMD)
+
+# --- Phase 12: release preparation (main is NEVER touched here) ----------
+# Full smoke pass for a release: default (dry-run) and enabled-routing stacks.
+smoke-final: smoke-all-dry-run smoke-all-routing
+
+# Print the redacted production-readiness report (booleans + redacted URLs only).
+readiness:
+	python -c "import sys,json; sys.path.insert(0,'services/api'); from app.config import readiness_report; print(json.dumps(readiness_report(), indent=2))"
+
+# Release gate: host-side checks + the production-readiness gate. This target does
+# NOT push, merge, or check out any branch — `main` stays untouched. In dev mode
+# (PRODUCTION_MODE unset) readiness is permissive and always passes; set
+# PRODUCTION_MODE=true (with the prod env) to enforce the required checks.
+release-check:
+	@echo "release-check: host-side checks + readiness gate (main untouched)"
+	pytest -q
+	python -m compileall services/api/app services/hermes-agent/hermes_agent scripts
+	$(COMPOSE) $(BASE) config >/dev/null
+	$(COMPOSE) $(BASE) $(ROUTING) $(SMOKE) config >/dev/null
+	python -c "import sys,json; sys.path.insert(0,'services/api'); from app.config import readiness_report; r=readiness_report(); print(json.dumps(r, indent=2)); sys.exit(0 if r['ready'] else 1)"
 
 # --- phase upload / release ---------------------------------------------
 # These make the git workflow explicit and keep `main` stable. Only

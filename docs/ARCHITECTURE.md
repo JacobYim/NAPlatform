@@ -346,3 +346,36 @@ pytest 커버리지: `test_webui_session.py`(login 성공, pending 로그인 차
 `test_webui_adapter_contract.py`(`contract.json`의 모든 endpoint가 올바른 method/응답 형태로 앱에
 존재, JS adapter가 모든 contract path를 참조, adapter 파일에 token/secret 미유출). 기본 스택과
 `main`은 불변이다(Phase 11은 `phase/11-core-webui-auth-session-integration`에서 작업).
+
+## Phase 12 — Production hardening & release prep
+
+```
+PRODUCTION_MODE=false (dev)  ─▶ readiness always ready; permissive defaults, no startup gate
+PRODUCTION_MODE=true         ─▶ required checks gate readiness (report only; API still boots)
+
+app/config.py readiness_report() ─▶ redacted checks (booleans + redacted URLs, no secrets)
+  required-when-production: ADMIN_PASSWORD(non-default), DATABASE_URL(durable),
+    REDIS_URL|SESSION_STORE_STRICT, TRUSTED_ORIGINS(no *),
+    QDRANT_URL(if VECTOR_BACKEND=qdrant), NEO4J_URI/USER/PASSWORD(if GRAPH_BACKEND=neo4j),
+    HERMES_{DEP}_URL(if AGENT_ROUTING_ENABLED=true)
+
+FastAPI middleware ─▶ CORS(TRUSTED_ORIGINS allow-list; credentials off for *) +
+                      security headers (X-Content-Type-Options / X-Frame-Options /
+                      Referrer-Policy / Cross-Origin-Opener-Policy; HSTS only in prod)
+
+GET /admin/release/readiness (admin) ─▶ redacted readiness + final release checklist status
+GET /admin/audit/export      (admin) ─▶ read-only audit export (filters + json|jsonl),
+                                         no password_hash; retention advisory/non-destructive
+```
+
+- 기본(dev) 스택은 변하지 않는다: memory/dry-run, SQLite, in-memory 세션, readiness는 항상 ready.
+- `PRODUCTION_MODE=true`일 때만 필수 체크가 readiness를 gate한다(리포트만; API는 계속 기동해 왜
+  not-ready인지 확인 가능). 어떤 체크도 secret 값을 노출하지 않는다(불리언/redacted URL만).
+- CORS는 `TRUSTED_ORIGINS` allow-list(dev 기본 localhost)이며 wildcard일 때 credentials off.
+- 감사 export는 read-only이고 `password_hash`를 포함하지 않으며, retention은 문서화되어 있으나
+  기본적으로 비파괴적이다(`AUDIT_RETENTION_ENFORCE=false`; 어떤 행도 삭제하지 않는다).
+- `main`은 안정 baseline: Phase 12는 `phase/12-production-hardening-release-prep`에서 작업하며
+  명시적 승인 후 `make release-dev-to-main`에서만 갱신된다. `docs/FINAL_RELEASE_CHECKLIST.md` 참고.
+
+Environment(Phase 12): `PRODUCTION_MODE`, `TRUSTED_ORIGINS`, `SESSION_STORE_STRICT`,
+`AUDIT_RETENTION_DAYS`, `AUDIT_RETENTION_ENFORCE`.

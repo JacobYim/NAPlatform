@@ -30,10 +30,52 @@ are complete** and ready for a stable release. See [BRANCHING.md](BRANCHING.md).
 | 08 | Routing E2E Compose/smoke (default stack stays dry-run) | ✅ Completed |
 | 09 | Resource E2E smoke + explicit phase upload/release workflow | ✅ Completed |
 | 10 | Real Qdrant/Neo4j/HDFS backend adapters (memory/dry-run by default) | ✅ Completed |
-| **11** | **core-webui auth/session UI integration adapter (no live UI in tests)** | 🔄 **In progress** |
-| 12+ | Production hardening (live-backend E2E, secrets/auth, stable release to `main`) | ⏳ Upcoming |
+| 11 | core-webui auth/session UI integration adapter (no live UI in tests) | ✅ Completed |
+| **12** | **Production hardening & release prep (readiness validation, CORS/headers, audit export, release gate)** | 🔄 **In progress** |
 
-## Current phase — Phase 11 (in progress)
+## Current phase — Phase 12 (in progress)
+
+Phase 12 hardens the API for a real deployment and prepares the stable release to
+`main`, **without touching `main`**. Everything stays permissive by default: dev
+runs memory/dry-run, SQLite, in-memory sessions, and no readiness check blocks
+startup — the readiness gate only bites when `PRODUCTION_MODE=true`.
+
+Deliverables:
+
+- **Production env template (`.env.production.example`)** — documents every
+  production setting (secrets, CORS/`TRUSTED_ORIGINS`, backend modes, routing
+  flags, Redis/Postgres/Qdrant/Neo4j/HDFS/Hermes URLs) with dummy placeholders and
+  **no real secrets**.
+- **Runtime config validation (`app/config.py`)** — a redacted
+  `readiness_report()` that, when `PRODUCTION_MODE=true`, requires a non-default
+  `ADMIN_PASSWORD`, a durable `DATABASE_URL`, `REDIS_URL` **or**
+  `SESSION_STORE_STRICT`, concrete `TRUSTED_ORIGINS` (no `*`), backend URLs when
+  `VECTOR_BACKEND=qdrant`/`GRAPH_BACKEND=neo4j`, and routing URLs when
+  `AGENT_ROUTING_ENABLED=true`. Dev mode is always `ready`. Checks report booleans
+  and redacted URLs only — never a secret value.
+- **`GET /admin/release/readiness`** (admin-only) — the redacted readiness report
+  plus the final release checklist status. It never promotes `main`.
+- **CORS + security headers (`app/main.py`)** — a configurable `TRUSTED_ORIGINS`
+  allow-list (safe localhost dev defaults), credentials disabled for a wildcard,
+  and baseline security headers (`X-Content-Type-Options`, `X-Frame-Options`,
+  `Referrer-Policy`, `Cross-Origin-Opener-Policy`; HSTS added only in production).
+- **`GET /admin/audit/export`** (admin-only) — read-only audit export with
+  `action`/`actor`/`user_id`/`success`/`limit` filters, `format=json` (structured)
+  or `format=jsonl`. Retention is documented and **non-destructive by default**
+  (`AUDIT_RETENTION_DAYS`, `AUDIT_RETENTION_ENFORCE=false`); nothing deletes rows.
+- **Release docs + Makefile** — `docs/RELEASE_NOTES_TEMPLATE.md`,
+  `docs/FINAL_RELEASE_CHECKLIST.md`, and targets `release-check` (pytest +
+  compile + compose config + readiness gate; **never updates `main`**),
+  `compose-config-prod`, and `smoke-final`.
+- **Tests** — `services/api/tests/test_release_hardening.py` covers readiness
+  pass/fail/redaction, CORS + security headers, audit-export authz/filtering/no
+  `password_hash`, dev defaults unchanged, and the docs/Makefile release guard.
+
+`main` stays the stable baseline: Phase 12 is built on
+`phase/12-production-hardening-release-prep` and **leaves `main` unchanged`**
+until the final, explicitly-approved `make release-dev-to-main`.
+
+## Previous phase — Phase 11 (complete)
 
 Phase 11 wires the external post-login UI (`github.com/JacobYim/core-webui`) to the
 NAPlatform auth/session API through a **repo-controlled adapter package**, so the
