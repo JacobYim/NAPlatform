@@ -201,6 +201,58 @@ override만 적용한 경우 API 레벨 HTTP 라우팅(`hermes_invoked=true`)은
 **Branch policy:** Phase 08은 `phase/08-routing-e2e-compose`에서 작업하며 `main`은 건드리지 않는다
 (`docs/BRANCHING.md`).
 
+## Resource E2E smoke (hdfs/vector/graph/audit scope) — Phase 09
+
+`scripts/smoke_resources_e2e.py`는 routing이 아니라 **리소스 격리**를 검증하는 live E2E smoke이다.
+seeded admin으로 로그인해 **QC**와 **IT** user를 **idempotent**하게 생성·승인한 뒤 다음을 확인한다:
+
+- `GET /workspace/hdfs`가 호출자 **본인**의 personal root(`/naplatform/users/<username>`)와 본인 부서
+  root(`/naplatform/departments/QC`)만 반환하고 다른 부서 root는 노출하지 않는다;
+- `POST /admin/users/{id}/provision-hdfs`가 **dry-run**이라 `hdfs dfs` 명령 계획(`targets[].plan[].command`)만
+  반환하고 아무것도 실행하지 않는다(`dry_run=true`, `enabled=false`, 모든 `results`가 비어 있음);
+- **vector** personal/부서 insert+search가 scope대로 동작하고 QC의 레코드는 IT에게 절대 보이지 않는다;
+- **graph** personal/부서 insert+search도 동일하게 격리된다;
+- QC user가 `/vector/IT`, `/graph/IT`, `/resources/IT`에서 모두 `403`으로 **cross-department 거부**된다;
+- audit 로그(`GET /admin/audit`)에 핵심 이벤트(`vector_insert`/`vector_search`/`graph_insert`/`graph_search`/
+  `hdfs_provision`/`workspace_view`/`admin_user_update`/`login`)가 남는다.
+
+secret(비밀번호/세션 토큰)은 출력하지 않으며, vector/graph 레코드를 고정 id로 써서 재실행에 안전하다.
+in-cluster 실행은 Phase 08의 `smoke` 서비스를 재사용하되 command만 리소스 스크립트로 덮어쓴다.
+
+```bash
+# Resource smoke (기본 dry-run 스택)
+docker compose -f docker-compose.yml up -d --build
+docker compose -f docker-compose.yml -f docker-compose.smoke.yml \
+  run --rm smoke python /scripts/smoke_resources_e2e.py
+```
+
+Makefile 단축키: `make smoke-resources`, `make smoke-all-dry-run`(routing dry-run + resource),
+`make smoke-all-routing`(routing enabled + resource). 호스트에서 직접 돌릴 수도 있다:
+
+```bash
+SMOKE_API_BASE_URL=http://localhost:8080 python scripts/smoke_resources_e2e.py
+```
+
+환경변수: `SMOKE_API_BASE_URL`, `SMOKE_ADMIN_PASSWORD`/`ADMIN_PASSWORD`,
+`SMOKE_QC_EMAIL`/`SMOKE_QC_USERNAME`/`SMOKE_QC_PASSWORD`,
+`SMOKE_IT_EMAIL`/`SMOKE_IT_USERNAME`/`SMOKE_IT_PASSWORD`,
+`SMOKE_VECTOR_COLLECTION`, `SMOKE_GRAPH_LABEL`, `SMOKE_HEALTH_RETRIES`,
+`SMOKE_HEALTH_INTERVAL`, `SMOKE_REQUEST_TIMEOUT`.
+
+### Phase 업로드 / 릴리스 (main은 릴리스에서만 갱신)
+
+git 업로드/릴리스 흐름은 `PHASE_BRANCH`(기본값: 현재 브랜치)를 사용하는 명시적 Makefile 단계로 나뉜다.
+`main`은 오직 `release-dev-to-main`에서만 갱신되고 나머지 단계는 절대 건드리지 않는다.
+
+```bash
+make push-phase          # PHASE_BRANCH를 origin에 push (dev/main 미변경)
+make merge-phase-to-dev  # PHASE_BRANCH를 dev에 merge 후 push (main 미변경)
+make release-dev-to-main # 릴리스 전용 — main을 갱신하는 유일한 단계
+```
+
+**Branch policy:** Phase 09는 `phase/09-resource-e2e-smoke`에서 작업하며 `main`은 건드리지 않는다
+(`docs/BRANCHING.md`, `docs/ROADMAP.md`).
+
 ## Separate core-webui UI
 ```bash
 CORE_WEBUI_CONTEXT=../core-webui docker compose up -d ui
