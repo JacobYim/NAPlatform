@@ -1,39 +1,68 @@
 # NAPlatform developer commands.
 #
-# Phase 08 adds routing E2E smoke targets. The default stack stays SAFE / DRY-RUN
-# (AGENT_ROUTING_ENABLED=false); the enabled-routing targets layer the
-# docker-compose.override.routing.yml file on top. `main` is never touched by any
-# of these targets — see docs/BRANCHING.md (phase branches merge into `dev`,
-# `main` only after a full release).
+# Phase 08 added routing E2E smoke targets; Phase 09 adds resource E2E smoke and
+# makes the phase upload/release workflow explicit. The default stack stays SAFE /
+# DRY-RUN (AGENT_ROUTING_ENABLED=false); the enabled-routing targets layer the
+# docker-compose.override.routing.yml file on top.
+#
+# `main` is never touched by any target except `release-dev-to-main`, which is the
+# single, explicit release step. Phase branches push with `push-phase` and merge
+# into `dev` with `merge-phase-to-dev`; `main` only moves at a full release — see
+# docs/BRANCHING.md and docs/ROADMAP.md.
 
 COMPOSE            ?= docker compose
 BASE               := -f docker-compose.yml
 ROUTING            := -f docker-compose.override.routing.yml
 SMOKE              := -f docker-compose.smoke.yml
 
+# Phase upload/release variables. PHASE_BRANCH defaults to the current branch, so
+# the upload helpers operate on whatever phase you have checked out.
+PHASE_BRANCH       ?= $(shell git rev-parse --abbrev-ref HEAD)
+DEV_BRANCH         ?= dev
+MAIN_BRANCH        ?= main
+GIT_REMOTE         ?= origin
+
+# In-cluster resource smoke reuses the `smoke` service but overrides its command
+# to run the Phase 09 resource script instead of the Phase 08 routing script.
+RESOURCE_CMD       := python /scripts/smoke_resources_e2e.py
+
 .PHONY: help test smoke-unit compile compose-config compose-config-routing build \
-        up up-routing down smoke-dry smoke-routing
+        up up-routing down smoke-dry smoke-routing smoke-resources \
+        smoke-all-dry-run smoke-all-routing \
+        push-phase merge-phase-to-dev release-dev-to-main
 
 help:
-	@echo "Targets:"
+	@echo "Host-side checks (no Docker):"
 	@echo "  test               - run all pytest suites (api + hermes-agent + smoke unit)"
-	@echo "  smoke-unit         - run only the smoke-script unit tests (no Docker)"
+	@echo "  smoke-unit         - run only the smoke-script unit tests (routing + resources)"
 	@echo "  compile            - byte-compile api, hermes-agent, and scripts"
 	@echo "  compose-config     - validate the default (dry-run) Compose config"
 	@echo "  compose-config-routing - validate the enabled-routing Compose config"
 	@echo "  build              - build the api and hermes-agent images"
+	@echo ""
+	@echo "Stack lifecycle:"
 	@echo "  up                 - start the default stack (dry-run, routing OFF)"
 	@echo "  up-routing         - start the stack with routing ON (override applied)"
-	@echo "  smoke-dry          - run the in-cluster smoke against the dry-run stack"
-	@echo "  smoke-routing      - run the in-cluster smoke against the enabled stack"
 	@echo "  down               - stop the stack and remove volumes"
+	@echo ""
+	@echo "In-cluster smoke:"
+	@echo "  smoke-dry          - routing smoke against the dry-run stack (hermes_invoked=false)"
+	@echo "  smoke-routing      - routing smoke against the enabled stack (hermes_invoked=true)"
+	@echo "  smoke-resources    - resource smoke (hdfs/vector/graph/audit scope) against the default stack"
+	@echo "  smoke-all-dry-run  - routing (dry-run) + resource smoke against the default stack"
+	@echo "  smoke-all-routing  - routing (enabled) + resource smoke against the enabled stack"
+	@echo ""
+	@echo "Phase upload / release (main only moves at release-dev-to-main):"
+	@echo "  push-phase         - push PHASE_BRANCH ($(PHASE_BRANCH)) to $(GIT_REMOTE); main untouched"
+	@echo "  merge-phase-to-dev - merge PHASE_BRANCH into $(DEV_BRANCH) and push; main untouched"
+	@echo "  release-dev-to-main- RELEASE: merge $(DEV_BRANCH) into $(MAIN_BRANCH) and push (updates main)"
 
 # --- host-side checks (no Docker) ---------------------------------------
 test:
 	pytest -q
 
 smoke-unit:
-	pytest -q services/api/tests/test_smoke_routing_e2e.py
+	pytest -q services/api/tests/test_smoke_routing_e2e.py services/api/tests/test_smoke_resources_e2e.py
 
 compile:
 	python -m compileall services/api/app services/hermes-agent/hermes_agent scripts
@@ -66,3 +95,45 @@ smoke-dry:
 # Enabled: routing override applied, expect hermes_invoked=true.
 smoke-routing:
 	$(COMPOSE) $(BASE) $(ROUTING) $(SMOKE) run --rm -e SMOKE_EXPECT_ROUTING=true smoke
+
+# --- resource E2E smoke (in-cluster) ------------------------------------
+# HDFS workspace/provisioning + vector/graph scope + cross-department denial +
+# audit. Routing-agnostic, so it runs against the default (dry-run) stack.
+smoke-resources:
+	$(COMPOSE) $(BASE) $(SMOKE) run --rm smoke $(RESOURCE_CMD)
+
+# Both smokes against the default (dry-run) stack.
+smoke-all-dry-run:
+	$(COMPOSE) $(BASE) $(SMOKE) run --rm -e SMOKE_EXPECT_ROUTING=false smoke
+	$(COMPOSE) $(BASE) $(SMOKE) run --rm smoke $(RESOURCE_CMD)
+
+# Both smokes against the enabled-routing stack.
+smoke-all-routing:
+	$(COMPOSE) $(BASE) $(ROUTING) $(SMOKE) run --rm -e SMOKE_EXPECT_ROUTING=true smoke
+	$(COMPOSE) $(BASE) $(ROUTING) $(SMOKE) run --rm smoke $(RESOURCE_CMD)
+
+# --- phase upload / release ---------------------------------------------
+# These make the git workflow explicit and keep `main` stable. Only
+# `release-dev-to-main` ever updates `main`.
+
+# Step 1: push the phase branch. Never touches dev or main.
+push-phase:
+	@echo "push-phase: pushing '$(PHASE_BRANCH)' to $(GIT_REMOTE) (dev/main untouched)"
+	git push -u $(GIT_REMOTE) $(PHASE_BRANCH)
+
+# Step 2: integrate the phase branch into dev. Never touches main.
+merge-phase-to-dev:
+	@echo "merge-phase-to-dev: merging '$(PHASE_BRANCH)' into '$(DEV_BRANCH)' (main untouched)"
+	git checkout $(DEV_BRANCH)
+	git merge --no-ff $(PHASE_BRANCH)
+	git push $(GIT_REMOTE) $(DEV_BRANCH)
+	git checkout $(PHASE_BRANCH)
+
+# Step 3 (RELEASE ONLY): promote dev to main. This is the *only* target that
+# updates main, and only when explicitly invoked.
+release-dev-to-main:
+	@echo "release-dev-to-main: RELEASE — merging '$(DEV_BRANCH)' into '$(MAIN_BRANCH)' (updates main)"
+	git checkout $(MAIN_BRANCH)
+	git merge --no-ff $(DEV_BRANCH)
+	git push $(GIT_REMOTE) $(MAIN_BRANCH)
+	git checkout $(DEV_BRANCH)

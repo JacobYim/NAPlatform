@@ -229,3 +229,37 @@ Phase 06/07까지 API↔agent HTTP 경로와 그 계약을 갖췄다. Phase 08�
 기본 스택은 그대로 dry-run이며 `main`은 변경하지 않는다(Phase 08은 `phase/08-routing-e2e-compose`에서
 작업; `docs/BRANCHING.md`). 실제 Hermes CLI 실행은 agent의 `HERMES_AGENT_EXECUTION_ENABLED=true`로만
 켜지며, override는 API 레벨 HTTP 라우팅만 활성화한다.
+
+## Phase 09 — Resource E2E smoke + 명시적 phase upload/release
+
+Phase 08이 routing 경로를 live로 검증했다면, Phase 09는 **리소스 격리**(HDFS workspace/provisioning,
+vector/graph scope, cross-department 거부, audit)를 live로 검증하고, git 업로드/릴리스 흐름을 명시적
+Makefile 단계로 만들어 `main`이 실수로 갱신되지 않게 한다. 핵심 설계는 **리소스 smoke는 routing과
+무관하므로 기본 dry-run 스택에서 그대로 동작**하고, `main`은 오직 명시적 릴리스 단계에서만 움직인다는
+것이다. 전체 Phase 상태는 `docs/ROADMAP.md`에 있다.
+
+- **`scripts/smoke_resources_e2e.py` — `ResourceSmoke`** — API `/health` 대기 → seeded admin 로그인 →
+  **QC/IT** user **idempotent** 생성·승인 → 다음을 순서대로 검증한다:
+  - `GET /workspace/hdfs`가 호출자 본인의 personal root(`/naplatform/users/<username>`)와 본인 부서
+    root만 반환하고 타 부서 root는 노출하지 않음(scope 유출 방지);
+  - `POST /admin/users/{id}/provision-hdfs`가 dry-run이라 `hdfs dfs` 명령 계획만 반환하고 실행은 하지
+    않음(`dry_run=true`, `enabled=false`, `results` empty);
+  - vector/graph의 personal·department insert+search가 scope대로 동작하며 QC 레코드가 IT에게 절대
+    보이지 않음(다른 owner/부서 metadata 매칭 실패);
+  - QC user가 `/vector/IT`·`/graph/IT`·`/resources/IT`에서 모두 `403`으로 cross-department 거부됨;
+  - audit 로그에 핵심 이벤트(`vector_insert`/`vector_search`/`graph_insert`/`graph_search`/
+    `hdfs_provision`/`workspace_view`/`admin_user_update`/`login`)가 남음.
+  **secret 미출력 · 고정 id로 재실행 안전**. 주입된 HTTP client를 받아 Docker 없이 단위 테스트가 가능하다.
+- **In-cluster 실행** — Phase 08의 `smoke` 서비스를 재사용하되 command만 리소스 스크립트로 덮어써
+  Compose 네트워크 안에서 실행한다(`docker compose ... run --rm smoke python /scripts/smoke_resources_e2e.py`).
+- **명시적 phase upload/release** — Makefile에 `push-phase`(PHASE_BRANCH를 origin에 push),
+  `merge-phase-to-dev`(PHASE_BRANCH를 dev에 merge·push), `release-dev-to-main`(dev→main, **유일하게
+  main을 갱신**하는 단계)을 추가했다. 모든 단계는 `PHASE_BRANCH` 변수(기본값: 현재 브랜치)를 사용하고,
+  릴리스 단계 외에는 `main`을 절대 건드리지 않는다.
+- **테스트** — `test_smoke_resources_e2e.py`(fake API `httpx.MockTransport`로 workspace scope,
+  dry-run provisioning, vector/graph 격리 및 격리 파손 시 실패, cross-department 거부, audit 완전성,
+  signup idempotency, secret 미출력 검증)와, docs/Makefile이 Phase 09 upload 옵션과 현재 phase 상태를
+  담고 있는지 확인하는 `test_phase_docs.py`.
+
+기본 스택은 그대로 dry-run이며 `main`은 변경하지 않는다(Phase 09는 `phase/09-resource-e2e-smoke`에서
+작업; `docs/BRANCHING.md`, `docs/ROADMAP.md`).

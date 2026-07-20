@@ -103,6 +103,41 @@ Or via the Makefile: `make smoke-dry` and `make smoke-routing` (see `make help`)
 
 Environment (Phase 08 smoke): `SMOKE_API_BASE_URL`, `SMOKE_EXPECT_ROUTING`, `SMOKE_HERMES_HEALTH_URLS`, `SMOKE_ADMIN_PASSWORD`/`ADMIN_PASSWORD`, `SMOKE_QC_EMAIL`/`SMOKE_QC_USERNAME`/`SMOKE_QC_PASSWORD`, `SMOKE_HEALTH_RETRIES`, `SMOKE_HEALTH_INTERVAL`, `SMOKE_REQUEST_TIMEOUT`.
 
+## Phase 09 — Resource E2E smoke + explicit phase upload/release (main stays stable)
+
+Phase 09 adds a **resource-focused** end-to-end smoke that complements the Phase 08 routing smoke, and makes the git upload/release workflow explicit so `main` is never touched by accident. Full phase status lives in [`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+- **`scripts/smoke_resources_e2e.py`** — drives the real resource surface of a live stack. It waits for API health, logs in as the seeded admin, **idempotently** creates and approves both a **QC** user and an **IT** user, then asserts:
+  - `GET /workspace/hdfs` returns **only** the caller's own personal root (`/naplatform/users/<username>`) and its own department root (`/naplatform/departments/QC`) — never another department's root;
+  - `POST /admin/users/{id}/provision-hdfs` is a **dry run** — it returns the planned `hdfs dfs` commands (`targets[].plan[].command`) but executes nothing (`dry_run=true`, `enabled=false`, all `results` empty);
+  - **vector** personal/department insert+search are scoped correctly — the IT user never sees the QC user's personal or department points;
+  - **graph** personal/department insert+search are scoped correctly the same way;
+  - **cross-department denial** — the QC user is `403` on `/vector/IT/records`, `/graph/IT/nodes`, and `/resources/IT`;
+  - the audit log (`GET /admin/audit`) contains the key events (`vector_insert`/`vector_search`/`graph_insert`/`graph_search`/`hdfs_provision`/`workspace_view`/`admin_user_update`/`login`).
+  It is **idempotent** (users reused; vector/graph records written with fixed ids) and **never prints secrets**.
+- **Tests (no Docker)** — `services/api/tests/test_smoke_resources_e2e.py` drives the smoke logic against a fake API (`httpx.MockTransport`) that reproduces the real metadata scope rule, covering workspace scoping, dry-run provisioning, vector/graph isolation (including failure cases where isolation is broken), cross-department denial, audit completeness, signup idempotency, and secret redaction.
+
+Commands (in-cluster smoke reuses the `smoke` service, overriding its command):
+
+```bash
+# Resource smoke against the default (dry-run) stack
+docker compose -f docker-compose.yml up -d --build
+docker compose -f docker-compose.yml -f docker-compose.smoke.yml \
+  run --rm smoke python /scripts/smoke_resources_e2e.py
+```
+
+Or via the Makefile: `make smoke-resources`, plus `make smoke-all-dry-run` (routing dry-run + resource) and `make smoke-all-routing` (routing enabled + resource). See `make help`.
+
+**Explicit phase upload / release (main only moves at the final release):** the git workflow is encoded as separate Makefile steps that honor the `PHASE_BRANCH` variable (default: current branch). Only `release-dev-to-main` ever updates `main`.
+
+```bash
+make push-phase          # push PHASE_BRANCH to origin (dev/main untouched)
+make merge-phase-to-dev  # merge PHASE_BRANCH into dev and push (main untouched)
+make release-dev-to-main # RELEASE ONLY — the one step that updates main
+```
+
+Environment (Phase 09 smoke): `SMOKE_API_BASE_URL`, `SMOKE_ADMIN_PASSWORD`/`ADMIN_PASSWORD`, `SMOKE_QC_EMAIL`/`SMOKE_QC_USERNAME`/`SMOKE_QC_PASSWORD`, `SMOKE_IT_EMAIL`/`SMOKE_IT_USERNAME`/`SMOKE_IT_PASSWORD`, `SMOKE_VECTOR_COLLECTION`, `SMOKE_GRAPH_LABEL`, `SMOKE_HEALTH_RETRIES`, `SMOKE_HEALTH_INTERVAL`, `SMOKE_REQUEST_TIMEOUT`.
+
 ## Verify
 ```bash
 python -m pip install -r services/api/requirements-dev.txt
@@ -118,4 +153,4 @@ Local seeded admin: `admin@example.com` / `ChangeMe123!`.
 
 ## Branching
 
-See `docs/BRANCHING.md`. Phase branches merge into `dev`; `main` remains the stable/default branch and is updated from `dev` only after all planned phases are complete. Phase 08 was implemented on `phase/08-routing-e2e-compose` and **leaves `main` unchanged**.
+See `docs/BRANCHING.md` for the policy and `docs/ROADMAP.md` for full phase status. Phase branches merge into `dev`; `main` remains the stable/default branch and is updated from `dev` only after all planned phases are complete. The upload/release workflow is explicit via `make push-phase`, `make merge-phase-to-dev`, and (release only) `make release-dev-to-main`. Phase 09 was implemented on `phase/09-resource-e2e-smoke` and **leaves `main` unchanged**.
