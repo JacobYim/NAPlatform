@@ -96,6 +96,33 @@ services:
       NEO4J_PASSWORD: naplatform-password
     ports: ["8080:8080"]
     depends_on: [postgres, redis, qdrant, neo4j]
+  # Phase 14: one-shot core-webui first-run preseed. This runs BEFORE `ui` starts
+  # (ui depends_on it with condition: service_completed_successfully) and shares
+  # the `ui-hermes-home` volume, so it can drop the repo-controlled branding /
+  # settings / setup-completed markers into the core-webui state dir. Result:
+  # http://localhost:3000 opens the workspace directly with NO first-run setup
+  # screen. It is NON-INVASIVE — it never edits the external core-webui image or
+  # its entrypoint, only seeds the shared volume it reads. Env still overrides
+  # (BRAND_NAME / BRAND_LOGO / NAPLATFORM_API_BASE_URL win over the config files).
+  ui-preseed:
+    image: busybox:1.36
+    restart: "no"
+    command: ["sh", "/preseed/preseed.sh"]
+    environment:
+      HERMES_HOME: /home/hermeswebui/.hermes
+      HERMES_WEBUI_STATE_DIR: /home/hermeswebui/.hermes/webui
+      BRAND_NAME: HMGMA
+      BRAND_LOGO: /apptoo/branding/logo.jpg
+      NAPLATFORM_API_BASE_URL: http://api:8080
+      # Repo config is the source of truth; re-seed non-secret config each boot.
+      # Set CORE_WEBUI_PRESEED_FORCE=false to preserve an existing settings.json,
+      # or CORE_WEBUI_PRESEED_ENABLED=false to skip the preseed entirely.
+      CORE_WEBUI_PRESEED_ENABLED: "true"
+      CORE_WEBUI_PRESEED_FORCE: "true"
+    volumes:
+      - ui-hermes-home:/home/hermeswebui/.hermes
+      - ./config/core-webui:/preseed/src:ro
+      - ./config/core-webui/preseed.sh:/preseed/preseed.sh:ro
   ui:
     # Runtime UI is JacobYim/core-webui, not a local placeholder.
     # Override CORE_WEBUI_CONTEXT=../core-webui for local offline development.
@@ -108,11 +135,23 @@ services:
       HERMES_WEBUI_PORT: 8787
       HERMES_WEBUI_STATE_DIR: /home/hermeswebui/.hermes/webui
       NAPLATFORM_API_BASE_URL: http://api:8080
+      # Phase 14: first-run setup suppression. The ui-preseed service writes the
+      # repo config + setup-completed markers into the shared state dir before
+      # this service starts; these env flags are a belt-and-suspenders signal for
+      # core-webui versions that read the flag from the environment instead. All
+      # are overridable at run time.
+      HERMES_WEBUI_SETUP_COMPLETED: "true"
+      HERMES_WEBUI_DISABLE_FIRST_RUN: "true"
+      HERMES_WEBUI_SKIP_ONBOARDING: "true"
     ports: ["3000:8787"]
     volumes:
       - ui-hermes-home:/home/hermeswebui/.hermes
       - ui-workspace:/workspace
-    depends_on: [api]
+    depends_on:
+      api:
+        condition: service_started
+      ui-preseed:
+        condition: service_completed_successfully
   hermes-er: &agent
     build: {context: ./services/hermes-agent}
     environment: {DEPARTMENT: ER, HERMES_PROFILE: ER, API_BASE_URL: 'http://api:8080', HDFS_NAMENODE: 'hdfs://hdfs-namenode:9000'}

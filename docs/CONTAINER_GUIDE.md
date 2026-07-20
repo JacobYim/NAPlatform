@@ -454,3 +454,45 @@ Windows PowerShell 실행 절차(클론 → dev 체크아웃 → release-check �
 
 **Branch policy:** Phase 13은 `phase/13-docker-model-runner-gemma4-powershell`에서 작업하며 `main`은
 건드리지 않는다(stable). `main`은 명시적 승인 후 `make release-dev-to-main`에서만 갱신된다.
+
+## Phase 14 — core-webui first-run preseed (localhost:3000 초기 setup 화면 제거)
+
+새 볼륨에서 외부 core-webui UI는 http://localhost:3000 첫 접속 시 **initial setup / onboarding 화면**을
+띄운다. Phase 14는 **모든 first-run 설정을 이 저장소에서 미리 구성**해 Docker가 UI를 올릴 때 자동으로
+적용하므로, 첫 로드가 곧바로 HMGMA 워크스페이스로 열린다 — **setup 화면 없음(no setup screen)**.
+방식은 **non-invasive**하다: 외부 core-webui 이미지/entrypoint는 절대 수정하지 않고, UI가 읽는 공유
+볼륨에 저장소 config를 **서빙 전에** 시딩한다.
+
+구성 요소:
+
+- **저장소 config (`config/core-webui/`)** — `branding.yaml`(HMGMA name/logo →
+  `$HERMES_HOME/branding.yaml`), `webui-settings.json`(first-run 설정: `first_run: false` /
+  `setup_completed: true` / `onboarding_completed: true`, API base URL `http://api:8080`, auth
+  adapter, 기본 endpoint 값 → core-webui state dir `$HERMES_WEBUI_STATE_DIR/settings.json`),
+  `README.md`. **secret 없음** — 비밀번호/토큰/API 키를 절대 기록하지 않으며, 세션 토큰은 API가 로그인
+  시 발급해 adapter가 브라우저 메모리에만 보관한다.
+- **preseed init (`preseed.sh` + `ui-preseed` 서비스)** — `ui-hermes-home` 볼륨을 `ui`와 공유하는
+  의존성 없는 busybox one-shot 서비스로, config + setup-completed 마커(`state.json`, `.setup-complete`)를
+  쓰고 종료한다. `ui`는 `depends_on`에 `condition: service_completed_successfully`로 이를 기다려
+  **core-webui가 서빙하기 전에** config가 적용된다. 기본 `docker-compose.yml`에 포함되므로 평범한
+  `docker compose up ui` 만으로 setup 화면이 사라진다.
+- **env override 유지** — `BRAND_NAME` / `BRAND_LOGO` / `NAPLATFORM_API_BASE_URL` 가 config 파일보다
+  우선하며, `ui`에는 `HERMES_WEBUI_SETUP_COMPLETED` / `HERMES_WEBUI_DISABLE_FIRST_RUN` env 플래그도
+  belt-and-suspenders로 선언한다.
+
+```bash
+# 기본 스택으로 UI 기동(자동으로 preseed 적용 → setup 화면 없음)
+docker compose up -d --build ui
+docker compose logs ui-preseed        # 1회성 preseed 실행 로그
+docker compose logs -f ui
+# 브라우저에서 http://localhost:3000 → 곧바로 워크스페이스(초기 setup 화면 없음)
+
+# 오프라인 검증(Docker 불필요)
+python scripts/_phase14_check.py
+pytest -q services/api/tests/test_phase14_ui_preseed.py
+```
+
+PowerShell / Bash로 config를 편집하고 Docker를 기동하는 상세 절차는
+[config/core-webui/README.md](../config/core-webui/README.md) 참고. `main` policy는 이전 Phase와
+동일하다: Phase 14는 `phase/14-core-webui-first-run-autoconfig`에서 작업하며 `main`은 건드리지 않고
+stable로 남는다.

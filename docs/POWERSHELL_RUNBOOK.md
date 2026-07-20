@@ -208,6 +208,23 @@ docker compose -f docker-compose.yml -f docker-compose.model-runner.yml exec her
 
 ## 6. Adapter UI (core-webui auth/session adapter)
 
+> **Phase 14 — no first-run setup screen.** The full core-webui `ui` service is
+> preconfigured from the repo (`config\core-webui\`). A one-shot `ui-preseed`
+> service seeds branding + first-run settings (`first_run: false` /
+> `setup_completed: true`) into the shared volume **before** core-webui serves, so
+> http://localhost:3000 opens straight into the HMGMA workspace — **no setup
+> screen**. Bring it up and open it:
+>
+> ```powershell
+> docker compose -f docker-compose.yml up -d --build ui
+> docker compose -f docker-compose.yml logs ui-preseed   # one-shot preseed ran once
+> Start-Process "http://localhost:3000"                  # workspace, not a setup wizard
+> ```
+>
+> Edit the config or override env before bring-up — see
+> `config\core-webui\README.md` (PowerShell **and** Bash instructions). Env still
+> wins: `$env:BRAND_NAME`, `$env:NAPLATFORM_API_BASE_URL`, etc.
+
 The repo-controlled adapter is static (`services\ui\adapter\`). Point it at a running
 API and drive login/session/department-selection by hand:
 

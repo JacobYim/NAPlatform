@@ -32,6 +32,15 @@ BRAND_NAME: HMGMA
 BRAND_LOGO: /apptoo/branding/logo.jpg
 ```
 
+## Phase 14 — first-run setup 화면 제거 (repo preseed)
+
+새 볼륨에서 core-webui는 http://localhost:3000 첫 접속 시 **initial setup 화면**을 띄운다. Phase 14는
+first-run 설정을 저장소(`config/core-webui/`)에서 미리 구성하고, `docker-compose.yml`의 1회성
+`ui-preseed` 서비스가 `ui-hermes-home` 볼륨을 공유해 core-webui **서빙 전에** branding·settings·
+setup-completed 마커를 시딩한다(`ui`는 `service_completed_successfully`로 대기). 결과적으로 첫 로드가
+곧바로 워크스페이스로 열리고 **setup 화면이 없다**. 외부 repo는 vendor/수정하지 않는 non-invasive 방식이며
+secret은 어디에도 넣지 않는다. 편집·기동 방법(PowerShell/Bash)은 `config/core-webui/README.md` 참고.
+
 향후 Phase에서는 NAPlatform 로그인/승인 세션을 core-webui에 SSO/adapter로 연결해,
 로그인 후 core-webui가 `/agents/{department}/context`에서 받은 허용 tool/MCP/HDFS/vector/graph scope만 사용하게 한다.
 
