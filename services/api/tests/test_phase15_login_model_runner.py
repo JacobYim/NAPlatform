@@ -8,8 +8,8 @@ consistent:
   (A) After the first-run setup screen is skipped, the UI REQUIRES LOGIN — it must
       not land directly in chat. webui-settings.json declares login_required /
       require_auth / start_page=login (and defaults.landing=login), the ui service
-      wires HERMES_WEBUI_PASSWORD from ${CORE_WEBUI_PASSWORD} (dev-only default) plus
-      the login env flags, and NO password is written into any preseed file.
+      wires HERMES_WEBUI_AUTH_MODE=naplatform plus the login env flags, and NO
+      password is written into compose or any preseed file.
 
   (B) The shared endpoint + model (gemma4:31b) live in the repo-controlled,
       non-secret config/model-runner/model-runner.env. docker-compose.model-runner.yml
@@ -94,11 +94,10 @@ def test_ui_service_wires_login_and_password(compose):
     # First-run suppression is still present (skip setup, THEN require login).
     assert env.get("HERMES_WEBUI_SETUP_COMPLETED") in ("true", True)
     assert env.get("HERMES_WEBUI_DISABLE_FIRST_RUN") in ("true", True)
-    # Password is overridable via CORE_WEBUI_PASSWORD (dev-only default) and is not
-    # a hardcoded literal only.
-    pw = str(env.get("HERMES_WEBUI_PASSWORD") or "")
-    assert "CORE_WEBUI_PASSWORD" in pw, \
-        "HERMES_WEBUI_PASSWORD must come from ${CORE_WEBUI_PASSWORD} (overridable)"
+    # Phase 16: the WebUI gate delegates to NAPlatform accounts, so there must
+    # be no password-only WebUI fallback configured in compose.
+    assert env.get("HERMES_WEBUI_AUTH_MODE") == "naplatform"
+    assert "HERMES_WEBUI_PASSWORD" not in env
 
 
 def test_preseed_service_can_toggle_login_required(compose):
@@ -118,9 +117,10 @@ def test_config_readme_documents_login_and_password_override():
     readme = _read("config/core-webui/README.md")
     low = readme.lower()
     assert "login" in low and "/login" in readme, "README must document the login page behavior"
-    assert "CORE_WEBUI_PASSWORD" in readme, "README must document the password override env"
-    assert "$env:" in readme and "export CORE_WEBUI_PASSWORD" in readme, \
-        "README must show PowerShell and Bash password override"
+    assert "email + password" in readme, "README must document the email/password login form"
+    assert "register" in low and "admin approval" in low, "README must document registration and approval"
+    assert "HERMES_WEBUI_AUTH_MODE" in readme and "HERMES_WEBUI_PASSWORD" in readme
+    assert "cannot fall back to the old password-only gate" in readme
 
 
 # ====================== (B) model runner env_file refactor ==================

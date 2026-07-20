@@ -22,33 +22,29 @@ secret in any preseed file**:
   flip the `login_required`/`require_auth` booleans in the copied settings at boot
   (still **never** writing a password).
 
-## Login password (dev-only default, overridable)
+## Login and registration (email/password + admin approval)
 
-The **primary** login path is the NAPlatform adapter authenticating against the
-API's `POST /auth/login` — log in with the seeded admin `admin@example.com` /
-`ChangeMe123!` (or any active user). For core-webui versions that also have a
-**built-in single-password gate**, the `ui` service passes:
+The UI login page uses the NAPlatform account flow, not a password-only WebUI
+gate:
+
+1. **Register** tab posts to the API `POST /auth/signup`, creating a `pending`
+   user.
+2. Pending users cannot enter chat; login returns an approval-waiting message
+   until an admin approves the account.
+3. An admin approves/revokes users through the API (`PATCH /admin/users/{id}`).
+4. Once active, the user's **email + password** login posts to `POST /auth/login`,
+   the WebUI mints its local cookie, and the browser redirects to chat/workspace.
+
+The `ui` service sets:
 
 ```yaml
-HERMES_WEBUI_PASSWORD: "${CORE_WEBUI_PASSWORD:-ChangeMe123!}"
+HERMES_WEBUI_AUTH_MODE: naplatform
 ```
 
-`CORE_WEBUI_PASSWORD` overrides it. The default `ChangeMe123!` is a **documented
-dev-only** password (the same value as the seeded API `ADMIN_PASSWORD`) and is
-**never** written into `webui-settings.json`, `branding.yaml`, or `preseed.sh` —
-only injected as a container env. **Production must override it:**
+It intentionally does **not** set `HERMES_WEBUI_PASSWORD`, so current
+NAPlatform-auth WebUI builds cannot fall back to the old password-only gate.
 
-```powershell
-# PowerShell
-$env:CORE_WEBUI_PASSWORD = "a-strong-unique-password"
-docker compose up -d --build ui
-```
-
-```bash
-# Bash / Git Bash
-export CORE_WEBUI_PASSWORD=a-strong-unique-password
-docker compose up -d --build ui
-```
+Seeded local admin for approvals: `admin@example.com` / `ChangeMe123!`.
 
 ## How it works (non-invasive preseed)
 
