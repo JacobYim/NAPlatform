@@ -414,6 +414,34 @@ make up-model-runner               # start with the shared runner ON
 Phase 15 is implemented on `phase/15-login-required-model-runner-config` and
 **leaves `main` unchanged**. See **[config/model-runner/README.md](config/model-runner/README.md)**.
 
+## Phase 16 — email/password register + admin approval WebUI gate
+
+Phase 16 replaces the password-only core-webui gate with the NAPlatform account
+flow the platform requires:
+
+- `/login` now shows **Email + Password**, not password-only.
+- The same page has a **Register** tab. Registration posts to NAPlatform
+  `/auth/signup`, creates a `pending` user, and tells the user to wait for admin
+  approval.
+- Login posts to NAPlatform `/auth/login`. Pending/disabled users stay on the
+  login page with an approval-waiting message (`403`).
+- After an admin changes the user to `active`, the next email/password login
+  mints the local WebUI cookie and redirects to the chat/workspace.
+- Compose enables this with `HERMES_WEBUI_AUTH_MODE=naplatform` and does **not**
+  configure `HERMES_WEBUI_PASSWORD`, so current NAPlatform builds cannot fall
+  back to a password-only WebUI gate.
+
+Recommended local UI run:
+
+```bash
+cd ../core-webui && git checkout phase/naplatform-email-register-auth && git pull --ff-only
+cd ../NAPlatform
+UI_HOST_PORT=3001 docker compose up -d --build ui
+# open http://localhost:3001/login
+```
+
+Seeded admin for approvals remains `admin@example.com` / `ChangeMe123!`.
+
 ## Verify
 ```bash
 python -m pip install -r services/api/requirements-dev.txt

@@ -41,6 +41,10 @@
   "auth": {
     "adapter": "naplatform",
     "mode": "external",
+    "provider": "naplatform",
+    "login_form": "email_password",
+    "register_enabled": true,
+    "approval_required": true,
     "module": "adapter/naplatform-adapter.js",
     "contract": "adapter/contract.json",
     "token_storage": "memory",
@@ -51,6 +55,7 @@
   "endpoints": {
     "api_base_url": "http://api:8080",
     "department_options": "/auth/departments/options",
+    "register": "/auth/signup",
     "login": "/auth/login",
     "logout": "/auth/logout",
     "session": "/core-webui/session",
