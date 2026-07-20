@@ -307,6 +307,46 @@ the full clone → checkout → release-check → run → smoke → cleanup flow
 Phase 13 is implemented on `phase/13-docker-model-runner-gemma4-powershell` and
 **leaves `main` unchanged**.
 
+## Phase 14 — core-webui first-run preseed (no initial setup screen at localhost:3000)
+
+On a fresh volume the external core-webui UI shows an **initial setup / onboarding
+screen** at http://localhost:3000. Phase 14 removes it by **preconfiguring every
+required first-run setting from this repo** and applying it automatically when
+Docker brings the UI up, so the first load opens straight into the HMGMA
+workspace — **no setup screen**. The approach is **non-invasive**: the external
+core-webui image / entrypoint is never edited; the repo config is seeded into the
+shared volume the UI reads, before it serves.
+
+- **Repo-controlled config (`config/core-webui/`)** — `branding.yaml` (HMGMA,
+  copied to `$HERMES_HOME/branding.yaml`), `webui-settings.json` (the first-run
+  settings: `first_run: false` / `setup_completed: true` / `onboarding_completed:
+  true`, the `http://api:8080` API base URL, the auth adapter config, and default
+  endpoints — copied to `$HERMES_WEBUI_STATE_DIR/settings.json`), plus a `README.md`
+  with PowerShell **and** Bash edit/start instructions. **No secrets** are written.
+- **Preseed init (`preseed.sh` + the `ui-preseed` compose service)** — a
+  dependency-free busybox one-shot service that shares the `ui-hermes-home` volume
+  with `ui`, seeds the config + writes setup-completed markers, then exits. The
+  `ui` service `depends_on` it with `condition: service_completed_successfully`, so
+  the config is applied **before core-webui serves**. It is part of the **default**
+  compose, so a plain `docker compose up ui` suppresses the setup screen.
+- **Env override still possible** — `BRAND_NAME` / `BRAND_LOGO` /
+  `NAPLATFORM_API_BASE_URL` win over the config files, and `ui` also carries
+  `HERMES_WEBUI_SETUP_COMPLETED` / `HERMES_WEBUI_DISABLE_FIRST_RUN` env flags.
+- **Guards** — `services/api/tests/test_phase14_ui_preseed.py` and the offline
+  `scripts/_phase14_check.py` prove the compose mounts + waits for the preseed, the
+  config disables first-run, no secrets leak, the docs say localhost:3000 shows no
+  setup screen, and `main` stays guarded.
+
+```bash
+# PowerShell:  docker compose up -d --build ui ; Start-Process "http://localhost:3000"
+# Bash:        docker compose up -d --build ui   # then open http://localhost:3000
+python scripts/_phase14_check.py                 # offline compose/config wiring check
+```
+
+See **[config/core-webui/README.md](config/core-webui/README.md)** for editing the
+config and starting Docker in PowerShell and Bash. Phase 14 is implemented on
+`phase/14-core-webui-first-run-autoconfig` and **leaves `main` unchanged**.
+
 ## Verify
 ```bash
 python -m pip install -r services/api/requirements-dev.txt

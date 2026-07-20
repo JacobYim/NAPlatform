@@ -1,0 +1,15 @@
+# NAPlatform core-webui branding preseed (Phase 14).
+#
+# core-webui reads branding from `$HERMES_HOME/branding.yaml` (see
+# services/ui/README.md). The Phase 14 preseed (config/core-webui/preseed.sh)
+# copies this file to `$HERMES_HOME/branding.yaml` in the ui-hermes-home volume
+# BEFORE core-webui serves, so the white-label UI shows HMGMA branding on first
+# load and never displays the generic first-run branding step.
+#
+# This file contains NO secrets. Override the values at container start with the
+# BRAND_NAME / BRAND_LOGO env vars (they win over this file — see preseed.sh).
+name: HMGMA
+logo: /apptoo/branding/logo.jpg
+# Cosmetic defaults only; safe to edit in-repo.
+title: HMGMA — HMG Metaplant America
+description: NAPlatform department workspace (ER / IT / EHS / QC)

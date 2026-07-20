@@ -15,7 +15,7 @@ are complete** and ready for a stable release. See [BRANCHING.md](BRANCHING.md).
 - 🔄 **In progress** — active phase branch.
 - ⏳ **Upcoming** — planned, not yet started.
 
-## Phase status (through Phase 13)
+## Phase status (through Phase 14)
 
 | Phase | Title | Status |
 |------:|-------|--------|
@@ -32,9 +32,66 @@ are complete** and ready for a stable release. See [BRANCHING.md](BRANCHING.md).
 | 10 | Real Qdrant/Neo4j/HDFS backend adapters (memory/dry-run by default) | ✅ Completed |
 | 11 | core-webui auth/session UI integration adapter (no live UI in tests) | ✅ Completed |
 | 12 | Production hardening & release prep (readiness validation, CORS/headers, audit export, release gate) | ✅ Completed |
-| **13** | **Docker Model Runner shared gemma4:31b for all agents + PowerShell runbook** | 🔄 **In progress** |
+| 13 | Docker Model Runner shared gemma4:31b for all agents + PowerShell runbook | ✅ Completed |
+| **14** | **core-webui first-run preseed (suppress the initial setup screen via repo-controlled config)** | 🔄 **In progress** |
 
-## Current phase — Phase 13 (in progress)
+## Current phase — Phase 14 (in progress)
+
+Phase 14 removes the **initial setup / onboarding screen** that the external
+core-webui UI shows at http://localhost:3000 on a fresh volume. It does so by
+**preconfiguring every required first-run setting from this repo** and applying it
+automatically when Docker brings the UI up — so the first load opens straight into
+the HMGMA workspace, **no setup screen**. The mechanism is **non-invasive**: the
+external core-webui image / entrypoint is never edited; the repo config is seeded
+into the shared volume the UI reads, before it serves. **`main` is not touched.**
+
+Deliverables:
+
+- **Repo-controlled config (`config/core-webui/`)** — `branding.yaml` (HMGMA
+  name/logo, copied to `$HERMES_HOME/branding.yaml`), `webui-settings.json` (the
+  first-run settings: `first_run: false` / `setup_completed: true` /
+  `onboarding_completed: true`, the `http://api:8080` API base URL, the auth
+  adapter config, and the default endpoint values, copied to the core-webui state
+  dir `$HERMES_WEBUI_STATE_DIR/settings.json`), and `README.md`. **No secrets** —
+  no password/token/API key is ever written; the session token is minted by the
+  API at login and kept in browser memory by the adapter.
+- **Preseed init (`config/core-webui/preseed.sh` + `ui-preseed` service)** — a
+  dependency-free busybox one-shot service that shares the `ui-hermes-home` volume
+  with `ui`, seeds the config + writes setup-completed markers
+  (`state.json`, `.setup-complete`), then exits. The `ui` service `depends_on` it
+  with `condition: service_completed_successfully`, so the config is in place
+  **before core-webui serves**. Env still overrides
+  (`BRAND_NAME` / `BRAND_LOGO` / `NAPLATFORM_API_BASE_URL` win over the files), and
+  `ui` also carries `HERMES_WEBUI_SETUP_COMPLETED` / `HERMES_WEBUI_DISABLE_FIRST_RUN`
+  env flags as a belt-and-suspenders signal.
+- **Compose wiring (`docker-compose.yml`)** — the preseed is part of the **default**
+  compose, so a plain `docker compose up ui` suppresses the setup screen
+  automatically; the default stack stays otherwise dry-run/safe.
+- **PowerShell + Bash instructions** — `config/core-webui/README.md` documents
+  editing the config and starting Docker in both shells; the PowerShell runbook and
+  the container guide note that localhost:3000 shows **no setup screen**.
+- **Tests / guards** — `services/api/tests/test_phase14_ui_preseed.py` and the
+  offline `scripts/_phase14_check.py` prove: compose mounts the config + preseed
+  script and waits for it, the config disables first-run/enables setup_completed,
+  no secrets leak, the docs mention no setup screen at localhost:3000, and the
+  `main` guard still holds (only `release-dev-to-main` moves `main`).
+
+### Verify Phase 14 locally
+
+```bash
+python scripts/_phase14_check.py     # offline compose/config wiring check (no Docker)
+pytest -q services/api/tests/test_phase14_ui_preseed.py
+make test                            # full pytest suite
+make compile                         # byte-compile api + hermes-agent + scripts
+make compose-config                  # default Compose config (now includes the preseed)
+docker compose up -d --build ui      # localhost:3000 opens the workspace, no setup screen
+```
+
+`main` stays the stable baseline: Phase 14 is built on
+`phase/14-core-webui-first-run-autoconfig` and **leaves `main` unchanged** until the
+final, explicitly-approved `make release-dev-to-main`.
+
+## Previous phase — Phase 13 (complete)
 
 Phase 13 lets **every** department Hermes agent (ER / IT / EHS / QC) share **one**
 model — `gemma4:31b` — served by **Docker Model Runner** over an OpenAI-compatible

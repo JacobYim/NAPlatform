@@ -1,0 +1,53 @@
+{
+  "//": [
+    "NAPlatform core-webui first-run preseed settings (Phase 14).",
+    "The Phase 14 preseed (config/core-webui/preseed.sh) copies this file into the",
+    "core-webui state dir ($HERMES_WEBUI_STATE_DIR, default",
+    "/home/hermeswebui/.hermes/webui/settings.json) BEFORE core-webui serves, and",
+    "writes a setup-completed marker, so localhost:3000 opens straight into the",
+    "workspace with NO initial setup / onboarding wizard.",
+    "core-webui's exact settings schema is owned by the external repo and may differ;",
+    "this file therefore declares the first-run-disabled semantics under several",
+    "plausible key names (first_run/setup_completed/onboarding_completed/",
+    "initial_setup_completed) so the setup screen is suppressed robustly. Adjust the",
+    "key names here if a core-webui version uses a different one — no code change is",
+    "needed, this is pure repo-controlled config.",
+    "NO SECRETS: passwords, tokens and API keys are NEVER placed in this file. The",
+    "session token is minted by the API at login and kept in browser memory by the",
+    "adapter (services/ui/adapter/naplatform-adapter.js)."
+  ],
+  "first_run": false,
+  "setup_completed": true,
+  "onboarding_completed": true,
+  "initial_setup_completed": true,
+  "show_setup_wizard": false,
+  "branding": {
+    "name": "HMGMA",
+    "logo": "/apptoo/branding/logo.jpg",
+    "title": "HMGMA — HMG Metaplant America"
+  },
+  "api": {
+    "base_url": "http://api:8080"
+  },
+  "auth": {
+    "adapter": "naplatform",
+    "mode": "external",
+    "module": "adapter/naplatform-adapter.js",
+    "contract": "adapter/contract.json",
+    "token_storage": "memory"
+  },
+  "endpoints": {
+    "api_base_url": "http://api:8080",
+    "department_options": "/auth/departments/options",
+    "login": "/auth/login",
+    "logout": "/auth/logout",
+    "session": "/core-webui/session",
+    "session_status": "/core-webui/session/status",
+    "select_department": "/core-webui/session/select-department",
+    "chat_route_template": "/agents/{department}/chat"
+  },
+  "defaults": {
+    "departments": ["ER", "IT", "EHS", "QC"],
+    "landing": "workspace"
+  }
+}
