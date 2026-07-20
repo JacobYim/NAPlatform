@@ -80,9 +80,12 @@ def password_reset(email:str):
 def users(_:User=Depends(require_admin)): return [u.model_dump(exclude={'password_hash'}) for u in store.list_users()]
 @app.patch('/admin/users/{user_id}')
 def update_user(user_id:str, update:AdminUserUpdate, admin:User=Depends(require_admin)):
-    u=store.update_user(user_id,status=update.status,departments=[normalize_department(d) for d in update.departments] if update.departments is not None else None,password_hash=hash_password(update.password) if update.password is not None else None)
+    try:
+        u=store.update_user(user_id,email=str(update.email) if update.email is not None else None,username=update.username,status=update.status,departments=[normalize_department(d) for d in update.departments] if update.departments is not None else None,password_hash=hash_password(update.password) if update.password is not None else None,is_admin=update.is_admin)
+    except ValueError as e:
+        store.add_audit_event("admin_user_update",user_id=user_id,actor=admin.email,success=False,detail=str(e)); raise HTTPException(409,str(e))
     if not u: raise HTTPException(404,"user not found")
-    store.add_audit_event("admin_user_update",user_id=user_id,actor=admin.email,success=True,detail=f"status={update.status} departments={update.departments}")
+    store.add_audit_event("admin_user_update",user_id=user_id,actor=admin.email,success=True,detail=f"email={update.email} username={update.username} status={update.status} departments={update.departments} is_admin={update.is_admin} password_changed={update.password is not None}")
     return u.model_dump(exclude={'password_hash'})
 @app.get('/admin/audit',response_model=list[AuditEvent])
 def audit(limit:int=100,_:User=Depends(require_admin)): return store.list_audit_events(limit=limit)

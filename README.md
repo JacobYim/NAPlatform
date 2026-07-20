@@ -442,6 +442,22 @@ UI_HOST_PORT=3001 docker compose up -d --build ui
 
 Seeded admin for approvals remains `admin@example.com` / `ChangeMe123!`.
 
+## Phase 17 — Admin Hub + workspace access management
+
+Phase 17 adds the administrator landing page requested for admin logins:
+
+- Admin email/password login redirects to `/admin` instead of directly to chat.
+- `/admin` shows a designed hub with user counts, pending/active/admin metrics,
+  the user table, and an editor panel.
+- Admins can update email, username, status, departments, password, and admin role.
+- The hub shows the effective HDFS workspace roots for each user: personal root
+  `/naplatform/users/<username>` plus department roots
+  `/naplatform/departments/<DEPARTMENT>`. Changing username/departments updates
+  the displayed workspace roots and the API RBAC scope.
+- core-webui keeps the NAPlatform bearer token server-side only and proxies admin
+  calls through `/api/naplatform/admin/users`; no NAPlatform token is exposed to
+  the browser.
+
 ## Verify
 ```bash
 python -m pip install -r services/api/requirements-dev.txt
