@@ -458,6 +458,14 @@ Phase 17 adds the administrator landing page requested for admin logins:
   calls through `/api/naplatform/admin/users`; no NAPlatform token is exposed to
   the browser.
 
+## Phase 18 — Admin session controls
+
+Phase 18 hardens the admin/user session UX:
+
+- Settings → System now includes a Logout button that calls `/api/auth/logout`, clears the WebUI cookie/server-side NAPlatform token, and returns to `/login`.
+- Direct `/admin` navigation is allowed only for authenticated sessions whose NAPlatform login metadata has `is_admin=true`; non-admin sessions receive `403`.
+- Admin user edits can request `reset_sessions=true`, which invalidates existing NAPlatform bearer sessions for the selected user. The admin hub exposes this as “Reset existing login sessions after save.”
+
 ## Verify
 ```bash
 python -m pip install -r services/api/requirements-dev.txt

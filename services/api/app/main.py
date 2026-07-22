@@ -85,8 +85,10 @@ def update_user(user_id:str, update:AdminUserUpdate, admin:User=Depends(require_
     except ValueError as e:
         store.add_audit_event("admin_user_update",user_id=user_id,actor=admin.email,success=False,detail=str(e)); raise HTTPException(409,str(e))
     if not u: raise HTTPException(404,"user not found")
-    store.add_audit_event("admin_user_update",user_id=user_id,actor=admin.email,success=True,detail=f"email={update.email} username={update.username} status={update.status} departments={update.departments} is_admin={update.is_admin} password_changed={update.password is not None}")
-    return u.model_dump(exclude={'password_hash'})
+    sessions_invalidated=store.delete_user_sessions(user_id) if update.reset_sessions else 0
+    store.add_audit_event("admin_user_update",user_id=user_id,actor=admin.email,success=True,detail=f"email={update.email} username={update.username} status={update.status} departments={update.departments} is_admin={update.is_admin} password_changed={update.password is not None} reset_sessions={update.reset_sessions} sessions_invalidated={sessions_invalidated}")
+    data=u.model_dump(exclude={'password_hash'}); data['sessions_invalidated']=sessions_invalidated
+    return data
 @app.get('/admin/audit',response_model=list[AuditEvent])
 def audit(limit:int=100,_:User=Depends(require_admin)): return store.list_audit_events(limit=limit)
 @app.get('/admin/audit/export')

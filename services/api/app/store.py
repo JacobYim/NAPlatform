@@ -123,6 +123,10 @@ class Store:
         """Invalidate a session token (Redis or in-memory). Idempotent."""
         self.sessions.delete(token)
 
+    def delete_user_sessions(self, user_id: str) -> int:
+        """Invalidate all active sessions for a user."""
+        return self.sessions.delete_user_sessions(user_id)
+
     # --- password reset tokens --------------------------------------------
     def create_reset_token(self, user_id: str,
                            ttl_seconds: int = RESET_TOKEN_TTL_SECONDS) -> str:
