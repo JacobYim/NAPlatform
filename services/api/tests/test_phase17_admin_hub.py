@@ -62,3 +62,27 @@ def test_admin_update_rejects_duplicate_email():
     user_b = [u['id'] for u in users if u['email'] == email_b][0]
     r = client.patch(f'/admin/users/{user_b}', headers={'Authorization': f'Bearer {token}'}, json={'email': email_a})
     assert r.status_code == 409
+
+
+def test_admin_can_reset_existing_user_sessions_on_update():
+    token = _admin_token()
+    suffix = uuid4().hex[:8]
+    email = f'phase18-{suffix}@example.com'
+    username = f'p18{suffix}'
+    password = 'OldPass123!'
+    r = client.post('/auth/signup', json={'email': email, 'username': username, 'password': password, 'department': 'QC'})
+    assert r.status_code == 201, r.text
+    users = client.get('/admin/users', headers={'Authorization': f'Bearer {token}'}).json()
+    user_id = [u['id'] for u in users if u['email'] == email][0]
+    r = client.patch(f'/admin/users/{user_id}', headers={'Authorization': f'Bearer {token}'}, json={'status': 'active'})
+    assert r.status_code == 200, r.text
+
+    user_login = client.post('/auth/login', json={'email': email, 'password': password})
+    assert user_login.status_code == 200, user_login.text
+    user_token = user_login.json()['token']
+    assert client.get('/auth/me', headers={'Authorization': f'Bearer {user_token}'}).status_code == 200
+
+    r = client.patch(f'/admin/users/{user_id}', headers={'Authorization': f'Bearer {token}'}, json={'reset_sessions': True})
+    assert r.status_code == 200, r.text
+    assert r.json()['sessions_invalidated'] >= 1
+    assert client.get('/auth/me', headers={'Authorization': f'Bearer {user_token}'}).status_code == 401

@@ -32,6 +32,10 @@ class SessionStore:
     def delete(self, token: str) -> None:
         raise NotImplementedError
 
+    def delete_user_sessions(self, user_id: str) -> int:
+        """Invalidate every active session for a user and return count removed."""
+        raise NotImplementedError
+
 
 class MemorySessionStore(SessionStore):
     def __init__(self):
@@ -55,6 +59,14 @@ class MemorySessionStore(SessionStore):
 
     def delete(self, token: str) -> None:
         self._data.pop(token, None)
+
+    def delete_user_sessions(self, user_id: str) -> int:
+        removed = 0
+        for token, (stored_user_id, _expires_at) in list(self._data.items()):
+            if stored_user_id == user_id:
+                self._data.pop(token, None)
+                removed += 1
+        return removed
 
 
 class RedisSessionStore(SessionStore):
@@ -80,6 +92,13 @@ class RedisSessionStore(SessionStore):
 
     def delete(self, token: str) -> None:
         self._redis.delete(self.KEY_PREFIX + token)
+
+    def delete_user_sessions(self, user_id: str) -> int:
+        removed = 0
+        for key in self._redis.scan_iter(match=self.KEY_PREFIX + "*"):
+            if self._redis.get(key) == user_id:
+                removed += int(self._redis.delete(key) or 0)
+        return removed
 
 
 def build_session_store(redis_url: str | None = None) -> SessionStore:
