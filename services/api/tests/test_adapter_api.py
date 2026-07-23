@@ -39,7 +39,7 @@ def test_active_user_can_chat_own_department():
     r=client.post('/agents/ER/chat',headers={'Authorization':f'Bearer {ut}'},json={'message':'hello'})
     assert r.status_code==200,r.text; b=r.json()
     assert b['department']=='ER'; assert b['username']=='chatuser'; assert b['hermes_invoked'] is False
-    assert '/naplatform/users/chatuser' in b['hdfs_roots']; assert 'incident_report' in b['allowed_tools']
+    assert '/naplatform/users/chatuser/workspace' in b['hdfs_roots']; assert 'incident_report' in b['allowed_tools']
     assert 'mcp-er-filesystem' in b['allowed_mcp_servers']; assert 'hello' in b['reply']
 
 def test_chat_other_department_denied():
@@ -51,16 +51,16 @@ def test_resource_listing_returns_allowed_roots():
     ut=make_active_user('res@example.com','resuser',['QC'])
     r=client.get('/resources/QC',headers={'Authorization':f'Bearer {ut}'})
     assert r.status_code==200,r.text; b=r.json()
-    assert '/naplatform/departments/QC' in b['allowed_roots']; assert '/naplatform/users/resuser' in b['allowed_roots']
+    assert '/naplatform/departments/QC/department_shared' in b['allowed_roots']; assert '/naplatform/users/resuser/workspace' in b['allowed_roots']
 
 def test_resource_path_allowed():
     ut=make_active_user('res2@example.com','resuser2',['QC'])
-    r=client.get('/resources/QC',params={'path':'/naplatform/departments/QC/reports'},headers={'Authorization':f'Bearer {ut}'})
+    r=client.get('/resources/QC',params={'path':'/naplatform/departments/QC/department_shared/department_shared/reports'},headers={'Authorization':f'Bearer {ut}'})
     assert r.status_code==200,r.text
 
 def test_resource_path_forbidden_denied():
     ut=make_active_user('res3@example.com','resuser3',['QC'])
-    r=client.get('/resources/QC',params={'path':'/naplatform/departments/IT/secret'},headers={'Authorization':f'Bearer {ut}'})
+    r=client.get('/resources/QC',params={'path':'/naplatform/departments/IT/department_shared/secret'},headers={'Authorization':f'Bearer {ut}'})
     assert r.status_code==403,r.text
 
 def test_resource_other_department_denied():
@@ -83,32 +83,32 @@ def test_admin_pending_requires_admin():
 
 def test_hdfs_check_post_allowed():
     ut=make_active_user('hc1@example.com','hcuser1',['QC'])
-    r=client.post('/resources/hdfs/check',headers={'Authorization':f'Bearer {ut}'},json={'path':'/naplatform/departments/QC/reports','department':'QC'})
+    r=client.post('/resources/hdfs/check',headers={'Authorization':f'Bearer {ut}'},json={'path':'/naplatform/departments/QC/department_shared/department_shared/reports','department':'QC'})
     assert r.status_code==200,r.text; assert r.json()['allowed'] is True
 
 def test_hdfs_check_post_denied():
     ut=make_active_user('hc2@example.com','hcuser2',['QC'])
-    r=client.post('/resources/hdfs/check',headers={'Authorization':f'Bearer {ut}'},json={'path':'/naplatform/departments/IT/secret','department':'QC'})
+    r=client.post('/resources/hdfs/check',headers={'Authorization':f'Bearer {ut}'},json={'path':'/naplatform/departments/IT/department_shared/secret','department':'QC'})
     assert r.status_code==403,r.text
 
 def test_hdfs_check_post_unknown_department():
     ut=make_active_user('hc3@example.com','hcuser3',['QC'])
-    r=client.post('/resources/hdfs/check',headers={'Authorization':f'Bearer {ut}'},json={'path':'/naplatform/departments/QC','department':'NOPE'})
+    r=client.post('/resources/hdfs/check',headers={'Authorization':f'Bearer {ut}'},json={'path':'/naplatform/departments/QC/department_shared','department':'NOPE'})
     assert r.status_code==403,r.text
 
 def test_hdfs_check_post_traversal_denied():
     ut=make_active_user('hc4@example.com','hcuser4',['QC'])
-    r=client.post('/resources/hdfs/check',headers={'Authorization':f'Bearer {ut}'},json={'path':'/naplatform/departments/QC/../IT/secret','department':'QC'})
+    r=client.post('/resources/hdfs/check',headers={'Authorization':f'Bearer {ut}'},json={'path':'/naplatform/departments/QC/department_shared/../IT/secret','department':'QC'})
     assert r.status_code==403,r.text
 
 def test_hdfs_check_get_still_works():
     ut=make_active_user('hc5@example.com','hcuser5',['QC'])
-    r=client.get('/resources/hdfs/check',params={'path':'/naplatform/departments/QC/reports','department':'QC'},headers={'Authorization':f'Bearer {ut}'})
+    r=client.get('/resources/hdfs/check',params={'path':'/naplatform/departments/QC/department_shared/department_shared/reports','department':'QC'},headers={'Authorization':f'Bearer {ut}'})
     assert r.status_code==200,r.text; assert r.json()['allowed'] is True
 
 def test_resource_path_traversal_denied():
     ut=make_active_user('trav@example.com','travuser',['QC'])
-    r=client.get('/resources/QC',params={'path':'/naplatform/departments/QC/../IT/secret'},headers={'Authorization':f'Bearer {ut}'})
+    r=client.get('/resources/QC',params={'path':'/naplatform/departments/QC/department_shared/../IT/secret'},headers={'Authorization':f'Bearer {ut}'})
     assert r.status_code==403,r.text
 
 def test_agent_context_regression():
@@ -116,7 +116,7 @@ def test_agent_context_regression():
     r=client.get('/agents/IT/context',headers={'Authorization':f'Bearer {ut}'})
     assert r.status_code==200,r.text; b=r.json()
     assert b['department']=='IT'; assert b['username']=='ctxuser'
-    assert '/naplatform/departments/IT' in b['hdfs_roots']; assert '/naplatform/users/ctxuser' in b['hdfs_roots']
+    assert '/naplatform/departments/IT/department_shared' in b['hdfs_roots']; assert '/naplatform/users/ctxuser/workspace' in b['hdfs_roots']
     assert 'ticket_lookup' in b['allowed_tools']; assert 'mcp-it-filesystem' in b['allowed_mcp_servers']
 
 def test_agent_context_other_department_denied():

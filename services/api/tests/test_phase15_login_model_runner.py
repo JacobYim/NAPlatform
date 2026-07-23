@@ -149,9 +149,10 @@ def test_model_runner_override_has_no_embedded_service(model_runner_compose):
     services = model_runner_compose.get("services") or {}
     assert "model-runner" not in services and "model_runner" not in services, \
         "no model-runner service by default — the stack must not start a runner itself"
-    # Only the API + the four agents are touched by the override.
-    assert set(services.keys()) == set(AGENTS), \
-        f"override should only wire {AGENTS}, got {sorted(services)}"
+    # The override wires the API, four department agents, and WebUI/preseed so
+    # browser chat also uses the same external Docker Model Runner.
+    assert set(services.keys()) == set(AGENTS) | {"ui", "ui-preseed"}, \
+        f"override should only wire agents plus WebUI, got {sorted(services)}"
 
 
 def test_model_runner_override_maps_host_gateway(model_runner_compose):

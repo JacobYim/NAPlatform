@@ -1,21 +1,30 @@
 from .models import DEPARTMENTS, User, UserStatus
 BASE="/naplatform"
 class AccessDenied(Exception): pass
+
 def normalize_department(department:str)->str:
     dep=department.upper()
     if dep not in DEPARTMENTS: raise ValueError(f"unknown department: {department}")
     return dep
-def user_personal_root(user:User)->str: return f"{BASE}/users/{user.username}"
-def department_root(department:str)->str: return f"{BASE}/departments/{normalize_department(department)}"
+
+def user_home_root(user:User)->str: return f"{BASE}/users/{user.username}"
+def user_personal_root(user:User)->str: return f"{user_home_root(user)}/workspace"
+def user_history_root(user:User)->str: return f"{user_home_root(user)}/chat_history"
+def department_home_root(department:str)->str: return f"{BASE}/departments/{normalize_department(department)}"
+def department_root(department:str)->str: return f"{department_home_root(department)}/department_shared"
+
 def allowed_hdfs_roots(user:User, active_department:str|None=None)->list[str]:
     if user.status!=UserStatus.active: return []
-    roots=[user_personal_root(user)]; deps=[normalize_department(d) for d in user.departments]
+    roots=[user_personal_root(user), user_history_root(user)]
+    deps=[normalize_department(d) for d in user.departments]
     if active_department:
         dep=normalize_department(active_department)
         if dep not in deps and not user.is_admin: raise AccessDenied("user is not a member of requested department")
         roots.append(department_root(dep))
-    else: roots += [department_root(d) for d in deps]
+    else:
+        roots += [department_root(d) for d in deps]
     return sorted(set(roots))
+
 def normalize_hdfs_path(path:str)->str:
     if not path.startswith('/'): raise AccessDenied(f"path must be absolute: {path}")
     segs=[]
@@ -24,14 +33,17 @@ def normalize_hdfs_path(path:str)->str:
         if s=='..': raise AccessDenied(f"path traversal not allowed: {path}")
         segs.append(s)
     return '/'+'/'.join(segs)
+
 def assert_hdfs_path_allowed(user:User,path:str,active_department:str|None=None)->None:
     p=normalize_hdfs_path(path)
     if any(p==r or p.startswith(r+'/') for r in allowed_hdfs_roots(user,active_department)): return
     raise AccessDenied(f"path not allowed: {path}")
+
 def qdrant_filter(user:User, active_department:str)->dict:
     dep=normalize_department(active_department)
     if dep not in user.departments and not user.is_admin: raise AccessDenied("department vector scope denied")
     return {"should":[{"key":"owner_user_id","match":{"value":user.id}},{"key":"allowed_users","match":{"any":[user.id]}},{"key":"department","match":{"value":dep}},{"key":"allowed_departments","match":{"any":[dep]}}]}
+
 def neo4j_filter(user:User, active_department:str)->dict:
     dep=normalize_department(active_department)
     if dep not in user.departments and not user.is_admin: raise AccessDenied("department graph scope denied")
@@ -43,6 +55,7 @@ def allowed_tools(user:User, active_department:str)->list[str]:
     if dep not in user.departments and not user.is_admin: raise AccessDenied("department tool scope denied")
     tools=DEPARTMENT_TOOLS[dep]
     return sorted(set(tools+["admin_users","admin_audit","nemoclaw","openshell"])) if user.is_admin else tools
+
 def allowed_mcp_servers(user:User, active_department:str)->list[str]:
     dep=normalize_department(active_department)
     if dep not in user.departments and not user.is_admin: raise AccessDenied("department MCP scope denied")

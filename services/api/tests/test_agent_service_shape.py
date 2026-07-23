@@ -29,7 +29,7 @@ def _user():
 def _ctx():
     return AgentContext(
         user_id="u1", username="alice", department="ER",
-        hdfs_roots=["/naplatform/users/alice", "/naplatform/departments/ER"],
+        hdfs_roots=["/naplatform/users/alice/workspace", "/naplatform/departments/ER/department_shared"],
         qdrant_filter={"should": []}, neo4j_filter={"owner_user_id": "u1"},
         allowed_tools=["hdfs_list", "incident_report"],
         allowed_mcp_servers=["mcp-er-filesystem"])
@@ -67,9 +67,9 @@ def test_router_payload_matches_service_contract():
     # The router posted every field the service's InvokeRequest requires.
     assert REQUIRED_PAYLOAD_KEYS.issubset(seen["body"].keys())
     assert seen["body"]["department"] == "ER"
-    assert seen["body"]["hdfs_roots"] == ["/naplatform/users/alice",
-                                          "/naplatform/departments/ER"]
-    assert seen["body"]["workspace_root"] == "/naplatform/users/alice"
+    assert seen["body"]["hdfs_roots"] == ["/naplatform/users/alice/workspace",
+                                          "/naplatform/departments/ER/department_shared"]
+    assert seen["body"]["workspace_root"] == "/naplatform/users/alice/workspace"
 
     # The router ingested the service's response shape.
     assert result["hermes_invoked"] is True  # HTTP call succeeded
