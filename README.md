@@ -515,6 +515,13 @@ The agent receives only those allowed roots plus
 `/naplatform/users/<username>/chat_history`; it must not list or mutate the
 parent `/naplatform/users/<username>` or `/naplatform/departments/<DEP>` paths.
 
+In NAPlatform external-auth mode, core-webui also mirrors every successfully
+completed chat turn to HDFS as a best-effort backup. After the assistant response
+is saved locally, the UI posts the full session transcript to
+`POST /workspace/hdfs/chat-history`; the API writes it to
+`/naplatform/users/<username>/chat_history/<session_id>.json`. HDFS/API failures
+are logged but do not fail the browser chat turn.
+
 The same data can be checked from Windows Git Bash with the Hadoop CLI inside the
 NameNode container. Important: set `MSYS_NO_PATHCONV=1`; otherwise Git Bash may
 rewrite `/naplatform/...` into a Windows `C:` path before Docker sees it.
