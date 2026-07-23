@@ -83,6 +83,27 @@ if [ -n "${CORE_WEBUI_LOGIN_REQUIRED:-}" ]; then
   sed -i "s#\"require_auth\": [a-z]*#\"require_auth\": $CORE_WEBUI_LOGIN_REQUIRED#g" "$SETTINGS" || true
 fi
 
+# --- Hermes Agent config for WebUI chat -------------------------------------
+# The browser chat path imports run_agent.AIAgent inside the WebUI container. When
+# the model-runner override supplies DOCKER_MODEL_RUNNER_BASE_URL/MODEL, seed a
+# minimal Hermes config into the shared HERMES_HOME so AIAgent has a provider and
+# does not fail with "No LLM provider configured". No real secret is written; the
+# Docker Model Runner/OpenAI-compatible local endpoint accepts a placeholder key.
+if [ -n "${DOCKER_MODEL_RUNNER_BASE_URL:-}" ]; then
+  cat > "$HERMES_HOME/config.yaml" <<EOF
+model:
+  provider: custom
+  default: ${DOCKER_MODEL_RUNNER_MODEL:-gemma4:31b}
+  base_url: ${DOCKER_MODEL_RUNNER_BASE_URL}
+agent:
+  max_turns: 20
+  disabled_toolsets: []
+approvals:
+  mode: off
+EOF
+  echo "[core-webui-preseed] Hermes Agent chat config -> $HERMES_HOME/config.yaml (${DOCKER_MODEL_RUNNER_MODEL:-gemma4:31b} @ $DOCKER_MODEL_RUNNER_BASE_URL)"
+fi
+
 # --- setup-completed markers ----------------------------------------------
 # Multiple markers so the first-run wizard stays suppressed regardless of which
 # signal a given core-webui version checks (a state file and/or a sentinel file).

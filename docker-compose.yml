@@ -181,12 +181,18 @@ services:
       # email + password, registration creates a pending API account, and only an
       # admin-approved active user receives the local WebUI cookie and reaches chat.
       HERMES_WEBUI_AUTH_MODE: naplatform
+      # WebUI chat needs the real Hermes Agent source on sys.path so it can import
+      # run_agent.AIAgent. On this Windows dev host the default points at the
+      # Hermes install under $HOME/AppData/Local/hermes/hermes-agent; override
+      # HERMES_AGENT_DIR if your Hermes source lives elsewhere.
+      HERMES_WEBUI_AGENT_DIR: /home/hermeswebui/.hermes/hermes-agent
     ports:
       # Default UI URL is http://localhost:3000. If port 3000 is already in use,
       # run with UI_HOST_PORT=3001 and open http://localhost:3001 instead.
       - "${UI_HOST_PORT:-3000}:8787"
     volumes:
       - ui-hermes-home:/home/hermeswebui/.hermes
+      - ${HERMES_AGENT_DIR:-${HOME}/AppData/Local/hermes/hermes-agent}:/home/hermeswebui/.hermes/hermes-agent:ro
       - ui-workspace:/workspace
     depends_on:
       api:

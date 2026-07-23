@@ -51,6 +51,14 @@ x-model-runner: &model-runner
     - "host.docker.internal:host-gateway"
 
 services:
+  ui-preseed:
+    <<: *model-runner
+  ui:
+    <<: *model-runner
+    environment:
+      HERMES_WEBUI_DEFAULT_MODEL: gemma4:31b
+      HERMES_INFERENCE_PROVIDER: custom
+      OPENAI_API_KEY: no-key-required
   api:
     <<: *model-runner
     environment:

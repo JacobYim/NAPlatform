@@ -454,6 +454,84 @@ curl -fsS http://localhost:8080/health
 curl -fsS http://localhost:3001/health   # use 3000 if UI_HOST_PORT was omitted
 ```
 
+Chat-specific checks:
+
+```bash
+# WebUI must be able to import the real Hermes Agent source; otherwise chat fails
+# with "AIAgent not available". The compose default uses the local Hermes install
+# at $HOME/AppData/Local/hermes/hermes-agent; override HERMES_AGENT_DIR if needed.
+CORE_WEBUI_CONTEXT=../core-webui UI_HOST_PORT=3001 \
+  docker compose -f docker-compose.yml -f docker-compose.model-runner.yml exec -T ui \
+  bash -lc 'cd /app && . venv/bin/activate && python - <<"PY"
+import os, sys
+sys.path.insert(0, os.environ["HERMES_WEBUI_AGENT_DIR"])
+from run_agent import AIAgent
+print("AIAgent import OK")
+PY'
+
+# The model-runner override also seeds ~/.hermes/config.yaml inside the WebUI
+# volume so WebUI chat has provider=custom, model=gemma4:31b, and the shared
+# Docker Model Runner endpoint.
+CORE_WEBUI_CONTEXT=../core-webui UI_HOST_PORT=3001 \
+  docker compose -f docker-compose.yml -f docker-compose.model-runner.yml exec -T ui \
+  cat /home/hermeswebui/.hermes/config.yaml
+```
+
+If chat shows `No LLM provider configured`, rerun the full model-runner compose
+command above so `ui-preseed` rewrites `/home/hermeswebui/.hermes/config.yaml`.
+If chat shows `AIAgent not available`, set `HERMES_AGENT_DIR` to a checkout or
+install of Hermes Agent that contains `run_agent.py`, for example:
+
+```bash
+HERMES_AGENT_DIR="$HOME/AppData/Local/hermes/hermes-agent" \
+CORE_WEBUI_CONTEXT=../core-webui UI_HOST_PORT=3001 \
+  docker compose -f docker-compose.yml -f docker-compose.model-runner.yml \
+  up -d --build --remove-orphans ui
+```
+
+### HDFS / Hadoop interface: workspace contents 확인
+
+NameNode web UI is exposed on `localhost:9870`. Use it to inspect the HDFS
+workspace tree directly:
+
+```text
+http://localhost:9870/explorer.html#/naplatform
+http://localhost:9870/explorer.html#/naplatform/users/admin
+http://localhost:9870/explorer.html#/naplatform/departments/QC
+```
+
+The same data can be checked from Windows Git Bash with the Hadoop CLI inside the
+NameNode container. Important: set `MSYS_NO_PATHCONV=1`; otherwise Git Bash may
+rewrite `/naplatform/...` into a Windows `C:` path before Docker sees it.
+
+```bash
+# Full tree
+MSYS_NO_PATHCONV=1 CORE_WEBUI_CONTEXT=../core-webui UI_HOST_PORT=3001 \
+  docker compose -f docker-compose.yml -f docker-compose.model-runner.yml exec -T hdfs-namenode \
+  hdfs dfs -ls -R /naplatform
+
+# User personal workspace
+MSYS_NO_PATHCONV=1 CORE_WEBUI_CONTEXT=../core-webui UI_HOST_PORT=3001 \
+  docker compose -f docker-compose.yml -f docker-compose.model-runner.yml exec -T hdfs-namenode \
+  hdfs dfs -ls /naplatform/users/admin
+
+# Read a file
+MSYS_NO_PATHCONV=1 CORE_WEBUI_CONTEXT=../core-webui UI_HOST_PORT=3001 \
+  docker compose -f docker-compose.yml -f docker-compose.model-runner.yml exec -T hdfs-namenode \
+  hdfs dfs -cat /naplatform/users/admin/hello.txt
+```
+
+WebHDFS JSON API is also exposed via the NameNode HTTP port:
+
+```bash
+curl -fsS 'http://localhost:9870/webhdfs/v1/naplatform/users/admin?op=LISTSTATUS&user.name=root' | python -m json.tool
+curl -fsS 'http://localhost:9870/webhdfs/v1/naplatform/users/admin/hello.txt?op=OPEN&user.name=root'
+```
+
+If the UI/API has not yet touched a user's workspace, that user directory may not
+exist until login/provisioning creates it. The HDFS browser should always stay
+under `/naplatform/users/<username>` and `/naplatform/departments/<department>`.
+
 If the output only shows `api`, `ui`, database/cache/vector/graph containers and
 not HDFS/Hermes, rerun the full command above. Do **not** append `ui`, `api`, or
 `api ui` to the end.
