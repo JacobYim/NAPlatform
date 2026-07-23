@@ -116,6 +116,7 @@ class Settings:
     hermes_bin: str
     execution_enabled: bool
     execution_timeout: float
+    execution_backend: str = "direct-openai"
     model_runtime: ModelRuntime = field(default_factory=ModelRuntime)
 
     @classmethod
@@ -134,5 +135,6 @@ class Settings:
             hermes_bin=(env.get("HERMES_BIN") or "hermes").strip(),
             execution_enabled=_as_bool(env.get("HERMES_AGENT_EXECUTION_ENABLED")),
             execution_timeout=timeout,
+            execution_backend=(env.get("HERMES_AGENT_EXECUTION_BACKEND") or "direct-openai").strip().lower(),
             model_runtime=resolve_model_runtime(env),
         )

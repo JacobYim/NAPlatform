@@ -216,6 +216,22 @@ def workspace_hdfs(user:User=Depends(require_active)):
     except (ProvisioningError,ValueError) as e: raise HTTPException(400,str(e))
     store.add_audit_event("workspace_view",user_id=user.id,actor=user.email,success=True,detail=f"hdfs status={resp.provisioning_status}")
     return resp
+
+@app.get('/workspace/hdfs/list')
+def workspace_hdfs_list(root:str,path:str='.',user:User=Depends(require_active)):
+    from .hdfs_web import HdfsBrowserError, list_dir as hdfs_list_dir
+    try: return hdfs_list_dir(user,root,path)
+    except AccessDenied as e: raise HTTPException(403,str(e))
+    except ValueError as e: raise HTTPException(400,str(e))
+    except HdfsBrowserError as e: raise HTTPException(e.status_code,e.message)
+
+@app.get('/workspace/hdfs/file')
+def workspace_hdfs_file(root:str,path:str,user:User=Depends(require_active)):
+    from .hdfs_web import HdfsBrowserError, read_file as hdfs_read_file
+    try: return hdfs_read_file(user,root,path)
+    except AccessDenied as e: raise HTTPException(403,str(e))
+    except ValueError as e: raise HTTPException(400,str(e))
+    except HdfsBrowserError as e: raise HTTPException(e.status_code,e.message)
 # --- Phase 05: Qdrant vector scope adapter -------------------------------
 @app.post('/vector/{department}/records',response_model=VectorInsertResponse,status_code=201)
 def vector_insert(department:str,req:VectorInsertRequest,user:User=Depends(require_active)):

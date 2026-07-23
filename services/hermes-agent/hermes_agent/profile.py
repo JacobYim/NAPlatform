@@ -29,12 +29,18 @@ naplatform:
 # OpenAI-compatible), so all agents share one model while their SOUL.md persona
 # stays per-department. The API key is referenced by env-var NAME (``api_key_env``)
 # — never its value — so no secret is written to disk.
-LLM_CONFIG_TEMPLATE = """llm:
-  provider: "{provider}"
+MODEL_CONFIG_TEMPLATE = """llm:
+  provider: "docker-model-runner"
   base_url: "{base_url}"
   model: "{model}"
-  openai_compatible: {openai_compatible}
-  api_key_env: "{api_key_env}"
+  openai_compatible: true
+  api_key_env: "OPENAI_API_KEY"
+agent:
+  max_turns: 12
+  tool_use_enforcement: auto
+terminal:
+  backend: local
+  cwd: "/tmp"
 """
 
 
@@ -49,12 +55,9 @@ def build_config_yaml(settings: Settings) -> str:
                                   hdfs_namenode=settings.hdfs_namenode)
     mr = settings.model_runtime
     if mr.configured:
-        text += LLM_CONFIG_TEMPLATE.format(
-            provider=mr.provider,
+        text += MODEL_CONFIG_TEMPLATE.format(
             base_url=mr.base_url,
-            model=mr.model,
-            openai_compatible=str(mr.openai_compatible).lower(),
-            api_key_env=mr.api_key_env)
+            model=mr.model)
     return text
 
 

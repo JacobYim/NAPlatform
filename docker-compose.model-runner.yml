@@ -60,19 +60,27 @@ services:
     <<: *model-runner
     environment:
       HERMES_AGENT_EXECUTION_ENABLED: "true"
+      HERMES_AGENT_EXECUTION_BACKEND: direct-openai
+      HERMES_AGENT_EXECUTION_TIMEOUT_SECONDS: "180"
       HERMES_LLM_PROVIDER: docker-model-runner
   hermes-it:
     <<: *model-runner
     environment:
       HERMES_AGENT_EXECUTION_ENABLED: "true"
+      HERMES_AGENT_EXECUTION_BACKEND: direct-openai
+      HERMES_AGENT_EXECUTION_TIMEOUT_SECONDS: "180"
       HERMES_LLM_PROVIDER: docker-model-runner
   hermes-ehs:
     <<: *model-runner
     environment:
       HERMES_AGENT_EXECUTION_ENABLED: "true"
+      HERMES_AGENT_EXECUTION_BACKEND: direct-openai
+      HERMES_AGENT_EXECUTION_TIMEOUT_SECONDS: "180"
       HERMES_LLM_PROVIDER: docker-model-runner
   hermes-qc:
     <<: *model-runner
     environment:
       HERMES_AGENT_EXECUTION_ENABLED: "true"
+      HERMES_AGENT_EXECUTION_BACKEND: direct-openai
+      HERMES_AGENT_EXECUTION_TIMEOUT_SECONDS: "180"
       HERMES_LLM_PROVIDER: docker-model-runner
