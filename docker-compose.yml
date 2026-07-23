@@ -192,7 +192,7 @@ services:
       - "${UI_HOST_PORT:-3000}:8787"
     volumes:
       - ui-hermes-home:/home/hermeswebui/.hermes
-      - ${HERMES_AGENT_DIR:-${HOME}/AppData/Local/hermes/hermes-agent}:/home/hermeswebui/.hermes/hermes-agent:ro
+      - ${HERMES_AGENT_DIR:-C:/Users/jyim67/AppData/Local/hermes/hermes-agent}:/home/hermeswebui/.hermes/hermes-agent:ro
       - ui-workspace:/workspace
     depends_on:
       api:
