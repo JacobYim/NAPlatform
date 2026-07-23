@@ -15,7 +15,7 @@ from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from .config import Settings
-from .executor import (HermesRunner, SubprocessHermesRunner,
+from .executor import (DirectOpenAICompatibleRunner, HermesRunner, SubprocessHermesRunner,
                        build_context_payload, build_hermes_argv,
                        scope_context_file)
 from .profile import prepare_profile
@@ -132,6 +132,18 @@ def _handle(request: Request, req: InvokeRequest) -> dict:
     return _dry_run(settings, req, request_id)
 
 
+def _default_runner(settings: Settings) -> HermesRunner:
+    if settings.execution_backend == "hermes-cli":
+        return SubprocessHermesRunner()
+    if not settings.model_runtime.configured:
+        return SubprocessHermesRunner()
+    return DirectOpenAICompatibleRunner(
+        base_url=settings.model_runtime.base_url,
+        model=settings.model_runtime.model,
+        department=settings.department,
+    )
+
+
 def build_app(settings: Settings | None = None, *, runner: HermesRunner | None = None,
               prepare_on_startup: bool = True) -> FastAPI:
     settings = settings or Settings.from_env()
@@ -144,7 +156,7 @@ def build_app(settings: Settings | None = None, *, runner: HermesRunner | None =
 
     app = FastAPI(title="NAPlatform Hermes Agent", lifespan=lifespan)
     app.state.settings = settings
-    app.state.runner = runner or SubprocessHermesRunner()
+    app.state.runner = runner or _default_runner(settings)
     app.state.profile_dir = None
 
     @app.get("/health")
@@ -154,6 +166,7 @@ def build_app(settings: Settings | None = None, *, runner: HermesRunner | None =
             "department": settings.department,
             "profile": settings.profile,
             "execution_enabled": settings.execution_enabled,
+            "execution_backend": settings.execution_backend,
             "profile_ready": app.state.profile_dir is not None,
             # Phase 13: shared model runtime (secret-free); shows whether this
             # agent is pointed at the Docker Model Runner / OpenAI-compatible model.

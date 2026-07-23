@@ -9,6 +9,8 @@ import json
 import os
 import subprocess
 import tempfile
+import urllib.request
+import urllib.error
 from contextlib import contextmanager
 from dataclasses import dataclass
 
@@ -36,8 +38,7 @@ def build_hermes_argv(hermes_bin: str, profile_dir: str, department: str,
     """
     return [
         hermes_bin,
-        "--profile-dir", profile_dir,
-        "--department", department,
+        "--profile", department,
         "chat",
         "--query", message,
         "--context-file", context_file,
@@ -99,3 +100,66 @@ class SubprocessHermesRunner(HermesRunner):
         except FileNotFoundError as e:
             return RunResult(127, "", f"hermes binary not found: {e}")
         return RunResult(proc.returncode, proc.stdout, proc.stderr)
+
+
+class DirectOpenAICompatibleRunner(HermesRunner):
+    """OpenAI-compatible fallback used by the compose stack.
+
+    The department service still performs the NAPlatform/Hermes scope validation
+    and profile/persona rendering; this runner sends the scoped prompt directly to
+    Docker Model Runner's OpenAI-compatible `/chat/completions` endpoint. It keeps
+    the stack usable even when the full Hermes CLI package is not installed inside
+    the slim service image.
+    """
+
+    def __init__(self, *, base_url: str, model: str, department: str):
+        self.base_url = base_url.rstrip("/")
+        self.model = "gemma4:31B" if model == "gemma4:31b" else model
+        self.department = department
+
+    def run(self, argv: list[str], timeout: float) -> RunResult:
+        try:
+            q_idx = argv.index("--query") + 1
+            user_message = argv[q_idx]
+        except (ValueError, IndexError):
+            user_message = argv[-1] if argv else ""
+        context_note = ""
+        try:
+            c_idx = argv.index("--context-file") + 1
+            context_note = f"NAPlatform scoped context JSON: {argv[c_idx]}\n\n"
+        except (ValueError, IndexError):
+            pass
+        payload = {
+            "model": self.model,
+            "temperature": 0.2,
+            "max_tokens": 768,
+            "messages": [
+                {"role": "system", "content": (
+                    f"You are the {self.department} department Hermes agent for NAPlatform. "
+                    "Honor the supplied RBAC/HDFS scope. NemoClaw and OpenShell are optional "
+                    "capabilities only when present in allowed_tools; do not claim external side effects."
+                )},
+                {"role": "user", "content": context_note + user_message},
+            ],
+        }
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            f"{self.base_url}/chat/completions",
+            data=data,
+            headers={"Content-Type": "application/json", "Authorization": "Bearer dummy"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                body = json.loads(resp.read().decode("utf-8", errors="replace"))
+        except TimeoutError as e:
+            return RunResult(None, "", str(e), timed_out=True)
+        except urllib.error.HTTPError as e:
+            err = e.read().decode("utf-8", errors="replace")[:500]
+            return RunResult(e.code, "", f"model runner HTTP {e.code}: {err}")
+        except Exception as e:  # noqa: BLE001
+            return RunResult(1, "", f"model runner request failed: {e}")
+        choice = (body.get("choices") or [{}])[0]
+        msg = choice.get("message") or {}
+        text = msg.get("content") or msg.get("reasoning_content") or ""
+        return RunResult(0, text, "")

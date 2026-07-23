@@ -106,16 +106,18 @@ build:
 
 # --- stack lifecycle -----------------------------------------------------
 up:
-	$(COMPOSE) $(BASE) up -d --build
+	$(COMPOSE) $(BASE) up -d --build --remove-orphans
 
 up-routing:
-	$(COMPOSE) $(BASE) $(ROUTING) up -d --build
+	$(COMPOSE) $(BASE) $(ROUTING) up -d --build --remove-orphans
 
-# Phase 13: start the stack with the shared Docker Model Runner (gemma4:31b) wired
-# to the API + every agent. Requires a working local Docker Model Runner + model
-# pull (see docker-compose.model-runner.yml); otherwise the default stack is safer.
+# Phase 13/20: start the FULL stack with the shared Docker Model Runner
+# (gemma4:31b) wired to the API + every agent. Do not append a service name like
+# `ui` or `api`: doing so starts only that subset and its dependencies, which
+# skips the department Hermes agents and HDFS workers. Requires a working local
+# Docker Model Runner + pulled model (see docker-compose.model-runner.yml).
 up-model-runner:
-	$(COMPOSE) $(BASE) $(MODEL_RUNNER) up -d --build
+	$(COMPOSE) $(BASE) $(MODEL_RUNNER) up -d --build --remove-orphans
 
 down:
 	$(COMPOSE) $(BASE) down -v

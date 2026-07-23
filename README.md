@@ -408,8 +408,55 @@ To use **no model runner at all**, simply **don't pass** `docker-compose.model-r
 
 ```bash
 make compose-config-model-runner   # validate (no runner needed)
-make up-model-runner               # start with the shared runner ON
+make up-model-runner               # start the FULL stack with the shared runner ON
 ```
+
+### Full Docker Model Runner stack: all containers, not only UI/API
+
+If you run Compose with a service name at the end, for example
+`docker compose ... up -d --build ui` or `docker compose ... up -d --build api ui`,
+Docker starts only that selected subset and its dependencies. That is useful for
+quick UI work, but it **does not start** the HDFS workers or the four department
+Hermes agents (`hermes-er`, `hermes-it`, `hermes-ehs`, `hermes-qc`).
+
+For the complete platform requested here — Docker Model Runner `gemma4:31b`, API
+routing, all department Hermes agents, HDFS Namenode/Datanodes, Qdrant, Neo4j,
+Redis/Postgres, and core-webui — run the override **without any service name**:
+
+```bash
+cd /c/Users/jyim67/Documents/NAPlatform-work/NAPlatform
+
+# If localhost:3000 is occupied, keep UI_HOST_PORT=3001 and open http://localhost:3001.
+# If 3000 is free, omit UI_HOST_PORT and open http://localhost:3000.
+CORE_WEBUI_CONTEXT=../core-webui UI_HOST_PORT=3001 \
+  docker compose -f docker-compose.yml -f docker-compose.model-runner.yml \
+  up -d --build --remove-orphans
+```
+
+Expected long-running containers after startup:
+
+```text
+api, ui, postgres, redis, qdrant, neo4j,
+hdfs-namenode, hdfs-datanode-1, hdfs-datanode-2, hdfs-datanode-3,
+hermes-er, hermes-it, hermes-ehs, hermes-qc
+```
+
+`ui-preseed` and `hdfs-init` are one-shot initializer services; it is normal if
+they appear as `Exited (0)` after they finish.
+
+Check everything:
+
+```bash
+CORE_WEBUI_CONTEXT=../core-webui UI_HOST_PORT=3001 \
+  docker compose -f docker-compose.yml -f docker-compose.model-runner.yml ps
+
+curl -fsS http://localhost:8080/health
+curl -fsS http://localhost:3001/health   # use 3000 if UI_HOST_PORT was omitted
+```
+
+If the output only shows `api`, `ui`, database/cache/vector/graph containers and
+not HDFS/Hermes, rerun the full command above. Do **not** append `ui`, `api`, or
+`api ui` to the end.
 
 Phase 15 is implemented on `phase/15-login-required-model-runner-config` and
 **leaves `main` unchanged**. See **[config/model-runner/README.md](config/model-runner/README.md)**.
