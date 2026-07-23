@@ -39,11 +39,11 @@ def _make_active_user(email, username, departments):
 def test_personal_plan_is_700_with_user_acl():
     prov = HdfsProvisioner(enabled=False)
     target, _argvs = prov.personal_target("alice")
-    assert target.path == "/naplatform/users/alice"
+    assert target.path == "/naplatform/users/alice/workspace"
     assert target.kind == "personal" and target.mode == "700"
     cmds = [c.command for c in target.plan]
-    assert "hdfs dfs -mkdir -p /naplatform/users/alice" in cmds
-    assert "hdfs dfs -chmod 700 /naplatform/users/alice" in cmds
+    assert "hdfs dfs -mkdir -p /naplatform/users/alice/workspace" in cmds
+    assert "hdfs dfs -chmod 700 /naplatform/users/alice/workspace" in cmds
     assert any(c.startswith("hdfs dfs -chown alice:alice ") for c in cmds)
     assert any("-setfacl -m user:alice:rwx" in c for c in cmds)
 
@@ -51,11 +51,11 @@ def test_personal_plan_is_700_with_user_acl():
 def test_department_plan_is_770_with_group_and_user_acl():
     prov = HdfsProvisioner(enabled=False)
     target, _argvs = prov.department_target("alice", "ER")
-    assert target.path == "/naplatform/departments/ER"
+    assert target.path == "/naplatform/departments/ER/department_shared"
     assert target.kind == "department" and target.mode == "770"
     cmds = [c.command for c in target.plan]
-    assert "hdfs dfs -mkdir -p /naplatform/departments/ER" in cmds
-    assert "hdfs dfs -chmod 770 /naplatform/departments/ER" in cmds
+    assert "hdfs dfs -mkdir -p /naplatform/departments/ER/department_shared" in cmds
+    assert "hdfs dfs -chmod 770 /naplatform/departments/ER/department_shared" in cmds
     assert any("-setfacl -m group:naplatform-er:rwx" in c for c in cmds)
     assert any("-setfacl -m user:alice:rwx" in c for c in cmds)
 
@@ -64,9 +64,10 @@ def test_build_targets_covers_personal_and_each_department():
     prov = HdfsProvisioner(enabled=False)
     plan = prov.plan("bob", ["ER", "IT"])
     paths = {p.path for p in plan}
-    assert paths == {"/naplatform/users/bob",
-                     "/naplatform/departments/ER",
-                     "/naplatform/departments/IT"}
+    assert paths == {"/naplatform/users/bob/workspace",
+                     "/naplatform/users/bob/chat_history",
+                     "/naplatform/departments/ER/department_shared",
+                     "/naplatform/departments/IT/department_shared"}
 
 
 # --- validation / traversal ---------------------------------------------
@@ -122,8 +123,9 @@ def test_admin_can_provision_user_dry_run_default():
     body = r.json()
     assert body['dry_run'] is True and body['enabled'] is False
     paths = {d['path'] for d in body['targets']}
-    assert '/naplatform/users/hdfsone' in paths
-    assert '/naplatform/departments/ER' in paths
+    assert '/naplatform/users/hdfsone/workspace' in paths
+    assert '/naplatform/users/hdfsone/chat_history' in paths
+    assert '/naplatform/departments/ER/department_shared' in paths
     assert all(d['results'] == [] for d in body['targets'])
 
 
@@ -150,13 +152,15 @@ def test_workspace_hdfs_returns_only_own_roots():
     r = client.get('/workspace/hdfs', headers={'Authorization': f'Bearer {token}'})
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body['personal_root'] == '/naplatform/users/hdfsfour'
-    assert body['department_roots'] == ['/naplatform/departments/EHS']
+    assert body['user_home_root'] == '/naplatform/users/hdfsfour'
+    assert body['personal_root'] == '/naplatform/users/hdfsfour/workspace'
+    assert body['history_root'] == '/naplatform/users/hdfsfour/chat_history'
+    assert body['department_roots'] == ['/naplatform/departments/EHS/department_shared']
     assert body['dry_run'] is True
     assert body['provisioning_status'] == 'dry_run'
     # The plan must only reference this user's own personal + department roots.
     paths = {p['path'] for p in body['plan']}
-    assert paths == {'/naplatform/users/hdfsfour', '/naplatform/departments/EHS'}
+    assert paths == {'/naplatform/users/hdfsfour/workspace', '/naplatform/users/hdfsfour/chat_history', '/naplatform/departments/EHS/department_shared'}
     assert not any('IT' in p or 'QC' in p or 'ER' in p for p in paths)
 
 

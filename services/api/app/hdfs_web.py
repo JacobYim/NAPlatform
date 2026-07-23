@@ -1,11 +1,12 @@
 """Minimal WebHDFS-backed file browser for NAPlatform workspaces.
 
-This module exposes read-only HDFS directory/file access behind the same RBAC
-roots used for agent context. It uses WebHDFS on the NameNode HTTP port so the
-API container does not need a Hadoop CLI binary or Docker socket.
+This module exposes HDFS directory/file access behind the same RBAC roots used
+for agent context. It uses WebHDFS on the NameNode HTTP port so the API
+container does not need a Hadoop CLI binary or Docker socket.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import posixpath
@@ -14,8 +15,8 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 
-from .rbac import assert_hdfs_path_allowed, normalize_hdfs_path
 from .models import User
+from .rbac import assert_hdfs_path_allowed, normalize_hdfs_path
 
 WEBHDFS_URL = os.environ.get("HDFS_WEBHDFS_URL", "http://hdfs-namenode:9870/webhdfs/v1").rstrip("/")
 WEBHDFS_USER = os.environ.get("HDFS_WEBHDFS_USER", "root")
@@ -95,7 +96,7 @@ def list_dir(user: User, root: str, rel: str = ".") -> dict:
             "mtime_ns": int(item.get("modificationTime", 0)) * 1_000_000 if item.get("modificationTime") else None,
             "hdfs_path": posixpath.join(path, name),
         })
-    signature = str(hash(tuple((e["name"], e["type"], e.get("size"), e.get("mtime_ns")) for e in entries)))
+    signature = hashlib.sha256(json.dumps(entries, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
     return {"entries": entries, "signature": signature, "path": rel or ".", "hdfs_root": normalize_hdfs_path(root)}
 
 
@@ -116,3 +117,30 @@ def read_file(user: User, root: str, rel: str) -> dict:
         raise HdfsBrowserError(f"WebHDFS OPEN failed for {path}: HTTP {e.code} {detail}", e.code) from e
     content = raw.decode("utf-8", errors="replace")
     return {"path": rel, "content": content, "size": len(raw), "lines": content.count("\n") + 1, "hdfs_path": path}
+
+
+def write_file(user: User, root: str, rel: str, content: str) -> dict:
+    path = _join(root, rel)
+    assert_hdfs_path_allowed(user, path)
+    parent = posixpath.dirname(path)
+    assert_hdfs_path_allowed(user, parent)
+    _request_json(parent, "MKDIRS", method="PUT")
+    data = (content or "").encode("utf-8")
+    first = _url(path, "CREATE", overwrite="true")
+    req = urllib.request.Request(first, headers={"Content-Type": "application/octet-stream"}, method="PUT")
+    try:
+        urllib.request.urlopen(req, timeout=WEBHDFS_TIMEOUT_SECONDS).read()
+        location = first
+    except urllib.error.HTTPError as e:
+        if e.code != 307:
+            detail = e.read().decode("utf-8", errors="replace")[:300]
+            raise HdfsBrowserError(f"WebHDFS CREATE failed for {path}: HTTP {e.code} {detail}", e.code) from e
+        location = e.headers.get("Location") or first
+    req2 = urllib.request.Request(location, data=data, headers={"Content-Type": "application/octet-stream"}, method="PUT")
+    try:
+        with urllib.request.urlopen(req2, timeout=WEBHDFS_TIMEOUT_SECONDS) as resp:
+            resp.read()
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="replace")[:300]
+        raise HdfsBrowserError(f"WebHDFS CREATE write failed for {path}: HTTP {e.code} {detail}", e.code) from e
+    return {"ok": True, "path": rel, "size": len(data), "hdfs_path": path}

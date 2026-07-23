@@ -23,7 +23,7 @@ import subprocess
 from .models import (HdfsCommandPlan, HdfsCommandResult, HdfsDirProvision,
                      HdfsHealthReport, HdfsProvisionReport, WorkspaceHdfsResponse)
 from .models import User
-from .rbac import BASE, normalize_department, normalize_hdfs_path
+from .rbac import BASE, department_root, normalize_department, normalize_hdfs_path, user_history_root, user_home_root, user_personal_root
 
 # First char must be alphanumeric/underscore so a name can never start with a
 # dot or dash; 3..64 chars total. This is stricter than the signup pattern and
@@ -111,8 +111,15 @@ class HdfsProvisioner:
 
     def personal_target(self, username: str) -> tuple[HdfsDirProvision, list[list[str]]]:
         username = validate_username(username)
-        path = f"{BASE}/users/{username}"
+        path = f"{BASE}/users/{username}/workspace"
         return self._dir_plan(path=path, kind="personal", owner=username,
+                              group=username, mode=PERSONAL_MODE,
+                              acl_entries=[f"user:{username}:rwx"])
+
+    def history_target(self, username: str) -> tuple[HdfsDirProvision, list[list[str]]]:
+        username = validate_username(username)
+        path = f"{BASE}/users/{username}/chat_history"
+        return self._dir_plan(path=path, kind="chat_history", owner=username,
                               group=username, mode=PERSONAL_MODE,
                               acl_entries=[f"user:{username}:rwx"])
 
@@ -121,7 +128,7 @@ class HdfsProvisioner:
         username = validate_username(username)
         dep = normalize_department(department)
         group = department_group(dep)
-        path = f"{BASE}/departments/{dep}"
+        path = f"{BASE}/departments/{dep}/department_shared"
         # The department dir grants the group rwx and adds a per-user ACL so the
         # member reaches the shared tree; mode 770 keeps outsiders out.
         return self._dir_plan(path=path, kind="department", owner=group,
@@ -132,7 +139,7 @@ class HdfsProvisioner:
     def build_targets(self, username: str, departments: list[str]
                       ) -> list[tuple[HdfsDirProvision, list[list[str]]]]:
         seen: set[str] = set()
-        targets = [self.personal_target(username)]
+        targets = [self.personal_target(username), self.history_target(username)]
         for d in departments:
             dep = normalize_department(d)
             if dep in seen:
@@ -211,8 +218,10 @@ class HdfsProvisioner:
         plan = self.plan(user.username, deps)
         return WorkspaceHdfsResponse(
             user_id=user.id, username=user.username,
-            personal_root=f"{BASE}/users/{user.username}",
-            department_roots=[f"{BASE}/departments/{d}" for d in deps],
+            user_home_root=user_home_root(user),
+            personal_root=user_personal_root(user),
+            history_root=user_history_root(user),
+            department_roots=[department_root(d) for d in deps],
             enabled=self.enabled,
             dry_run=True,
             provisioning_status="enabled" if self.enabled else "dry_run",

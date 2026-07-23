@@ -22,10 +22,11 @@ Environment: `DATABASE_URL`, `REDIS_URL`, `SESSION_TTL_SECONDS`, `ADMIN_PASSWORD
 
 `app/hdfs.py`'s `HdfsProvisioner` turns the RBAC HDFS roots into safe, deterministic `hdfs dfs` command plans and only executes them when explicitly enabled:
 
-- **Command plan** — personal dir `/naplatform/users/{username}` gets `mkdir -p` → `chown/chgrp` (placeholder) → `chmod 700` → `setfacl -m user:{username}:rwx`; each department dir `/naplatform/departments/{DEP}` gets `chmod 770` → `setfacl -m group:naplatform-{dep}:rwx` plus `setfacl -m user:{username}:rwx`.
+- **Command plan / visible roots** — each user has a home page/root at `/naplatform/users/{username}`, but the agent/UI are only allowed to use the child roots `/naplatform/users/{username}/workspace` and `/naplatform/users/{username}/chat_history`. Each department is similarly exposed through `/naplatform/departments/{DEP}/department_shared`. The parent user/department directories are provisioned/visible to operators in NameNode but are **not** agent-accessible workspace roots.
+- **ACL plan** — personal `workspace` and `chat_history` dirs get `mkdir -p` → `chown/chgrp` (placeholder) → `chmod 700` → `setfacl -m user:{username}:rwx`; each `department_shared` dir gets `chmod 770` → `setfacl -m group:naplatform-{dep}:rwx` plus `setfacl -m user:{username}:rwx`.
 - **Validation** — usernames must match `^[A-Za-z0-9_][A-Za-z0-9_.-]{2,63}$` (no leading dot/dash, no `..`), departments must be known, and every built path is re-checked to stay under `/naplatform` with no traversal.
 - **Dry-run vs enabled** — with `HDFS_PROVISIONING_ENABLED` unset/false (the default) provisioning is a **dry run**: it returns the planned commands and spawns **no subprocess**. Set `HDFS_PROVISIONING_ENABLED=true` to actually run each command via `subprocess.run` (argv list, no shell) and capture `returncode/stdout/stderr`.
-- **Endpoints** — `POST /admin/users/{user_id}/provision-hdfs` (admin-only) returns the provision plan/results for a user's personal + department dirs; `GET /workspace/hdfs` (active user) returns the caller's own personal root, department roots, and the dry-run plan with provisioning status.
+- **Endpoints** — `POST /admin/users/{user_id}/provision-hdfs` (admin-only) returns the provision plan/results for a user's `workspace`, `chat_history`, and department `department_shared` dirs; `GET /workspace/hdfs` (active user) returns `user_home_root`, `personal_root`, `history_root`, department roots, and the dry-run plan with provisioning status. `GET/POST /workspace/hdfs/file` and `POST /workspace/hdfs/chat-history` are RBAC-gated through the same roots.
 - **Audit** — `hdfs_provision` and `workspace_view` events are recorded.
 
 **Kerberos (production):** the `chown/chgrp` steps are placeholders — in production, directory ownership and access are enforced by Kerberos principals / proxy-users and HDFS ACLs, and provisioning runs as a keytab-authenticated service account, not by ad-hoc CLI calls.
@@ -497,8 +498,22 @@ workspace tree directly:
 ```text
 http://localhost:9870/explorer.html#/naplatform
 http://localhost:9870/explorer.html#/naplatform/users/admin
-http://localhost:9870/explorer.html#/naplatform/departments/QC
+http://localhost:9870/explorer.html#/naplatform/users/admin/workspace
+http://localhost:9870/explorer.html#/naplatform/users/admin/chat_history
+http://localhost:9870/explorer.html#/naplatform/departments/QC/department_shared
 ```
+
+The WebUI's Workspace panel is intentionally aligned to those child roots, not
+the parent `/naplatform/users/admin` page. In NAPlatform external-auth mode the
+default WebUI workspace is an aggregate HDFS view named
+`workspace + department_shared`; opening it shows:
+
+- `workspace` → `/naplatform/users/<username>/workspace`
+- `department_shared-<DEP>` → `/naplatform/departments/<DEP>/department_shared`
+
+The agent receives only those allowed roots plus
+`/naplatform/users/<username>/chat_history`; it must not list or mutate the
+parent `/naplatform/users/<username>` or `/naplatform/departments/<DEP>` paths.
 
 The same data can be checked from Windows Git Bash with the Hadoop CLI inside the
 NameNode container. Important: set `MSYS_NO_PATHCONV=1`; otherwise Git Bash may
@@ -513,24 +528,36 @@ MSYS_NO_PATHCONV=1 CORE_WEBUI_CONTEXT=../core-webui UI_HOST_PORT=3001 \
 # User personal workspace
 MSYS_NO_PATHCONV=1 CORE_WEBUI_CONTEXT=../core-webui UI_HOST_PORT=3001 \
   docker compose -f docker-compose.yml -f docker-compose.model-runner.yml exec -T hdfs-namenode \
-  hdfs dfs -ls /naplatform/users/admin
+  hdfs dfs -ls /naplatform/users/admin/workspace
+
+# User chat history
+MSYS_NO_PATHCONV=1 CORE_WEBUI_CONTEXT=../core-webui UI_HOST_PORT=3001 \
+  docker compose -f docker-compose.yml -f docker-compose.model-runner.yml exec -T hdfs-namenode \
+  hdfs dfs -ls /naplatform/users/admin/chat_history
+
+# Department shared workspace
+MSYS_NO_PATHCONV=1 CORE_WEBUI_CONTEXT=../core-webui UI_HOST_PORT=3001 \
+  docker compose -f docker-compose.yml -f docker-compose.model-runner.yml exec -T hdfs-namenode \
+  hdfs dfs -ls /naplatform/departments/QC/department_shared
 
 # Read a file
 MSYS_NO_PATHCONV=1 CORE_WEBUI_CONTEXT=../core-webui UI_HOST_PORT=3001 \
   docker compose -f docker-compose.yml -f docker-compose.model-runner.yml exec -T hdfs-namenode \
-  hdfs dfs -cat /naplatform/users/admin/hello.txt
+  hdfs dfs -cat /naplatform/users/admin/workspace/hello.txt
 ```
 
 WebHDFS JSON API is also exposed via the NameNode HTTP port:
 
 ```bash
-curl -fsS 'http://localhost:9870/webhdfs/v1/naplatform/users/admin?op=LISTSTATUS&user.name=root' | python -m json.tool
-curl -fsS 'http://localhost:9870/webhdfs/v1/naplatform/users/admin/hello.txt?op=OPEN&user.name=root'
+curl -fsS 'http://localhost:9870/webhdfs/v1/naplatform/users/admin/workspace?op=LISTSTATUS&user.name=root' | python -m json.tool
+curl -fsS 'http://localhost:9870/webhdfs/v1/naplatform/users/admin/workspace/hello.txt?op=OPEN&user.name=root'
 ```
 
 If the UI/API has not yet touched a user's workspace, that user directory may not
 exist until login/provisioning creates it. The HDFS browser should always stay
-under `/naplatform/users/<username>` and `/naplatform/departments/<department>`.
+under `/naplatform/users/<username>/workspace`,
+`/naplatform/users/<username>/chat_history`, and
+`/naplatform/departments/<department>/department_shared`.
 
 If the output only shows `api`, `ui`, database/cache/vector/graph containers and
 not HDFS/Hermes, rerun the full command above. Do **not** append `ui`, `api`, or
@@ -575,10 +602,12 @@ Phase 17 adds the administrator landing page requested for admin logins:
 - `/admin` shows a designed hub with user counts, pending/active/admin metrics,
   the user table, and an editor panel.
 - Admins can update email, username, status, departments, password, and admin role.
-- The hub shows the effective HDFS workspace roots for each user: personal root
-  `/naplatform/users/<username>` plus department roots
-  `/naplatform/departments/<DEPARTMENT>`. Changing username/departments updates
-  the displayed workspace roots and the API RBAC scope.
+- The hub shows the effective HDFS roots for each user: user home
+  `/naplatform/users/<username>` with allowed child roots `workspace` and
+  `chat_history`, plus department roots
+  `/naplatform/departments/<DEPARTMENT>/department_shared`. Changing
+  username/departments updates the displayed workspace roots and the API RBAC
+  scope.
 - core-webui keeps the NAPlatform bearer token server-side only and proxies admin
   calls through `/api/naplatform/admin/users`; no NAPlatform token is exposed to
   the browser.

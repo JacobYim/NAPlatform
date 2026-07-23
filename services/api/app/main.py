@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from .models import AgentContext, AdminUserUpdate, AuditEvent, ChatRequest, ChatResponse, CoreWebUILaunchConfig, DepartmentOptionsResponse, GraphNode, GraphNodeInsertRequest, GraphNodeInsertResponse, GraphNodeSearchRequest, GraphNodeSearchResponse, HdfsCheckRequest, HdfsProvisionReport, LoginRequest, LogoutResponse, PendingApproval, ResourceListResponse, SelectDepartmentRequest, SelectedDepartmentResponse, SessionBootstrapResponse, SessionStatusResponse, SignupRequest, User, UserStatus, VectorInsertRequest, VectorInsertResponse, VectorRecord, VectorSearchRequest, VectorSearchResponse, WorkspaceHdfsResponse
 from .hdfs import HdfsProvisioner, ProvisioningError, backend_status as hdfs_backend_status
-from .rbac import AccessDenied, allowed_hdfs_roots, allowed_mcp_servers, allowed_tools, assert_hdfs_path_allowed, neo4j_filter, normalize_department, qdrant_filter
+from .rbac import AccessDenied, allowed_hdfs_roots, allowed_mcp_servers, allowed_tools, assert_hdfs_path_allowed, neo4j_filter, normalize_department, qdrant_filter, user_history_root
 from .vector import VectorScopeError, vector_adapter
 from .graph import GraphScopeError, graph_adapter
 from .agent_router import AgentTimeout, AgentUpstreamError, AgentError, agent_router
@@ -229,6 +229,32 @@ def workspace_hdfs_list(root:str,path:str='.',user:User=Depends(require_active))
 def workspace_hdfs_file(root:str,path:str,user:User=Depends(require_active)):
     from .hdfs_web import HdfsBrowserError, read_file as hdfs_read_file
     try: return hdfs_read_file(user,root,path)
+    except AccessDenied as e: raise HTTPException(403,str(e))
+    except ValueError as e: raise HTTPException(400,str(e))
+    except HdfsBrowserError as e: raise HTTPException(e.status_code,e.message)
+
+@app.post('/workspace/hdfs/file')
+async def workspace_hdfs_file_save(request:Request,user:User=Depends(require_active)):
+    from .hdfs_web import HdfsBrowserError, write_file as hdfs_write_file
+    body=await request.json()
+    try: return hdfs_write_file(user,str(body.get('root') or ''),str(body.get('path') or ''),str(body.get('content') or ''))
+    except AccessDenied as e: raise HTTPException(403,str(e))
+    except ValueError as e: raise HTTPException(400,str(e))
+    except HdfsBrowserError as e: raise HTTPException(e.status_code,e.message)
+
+@app.post('/workspace/hdfs/chat-history')
+async def workspace_hdfs_chat_history(request:Request,user:User=Depends(require_active)):
+    from datetime import datetime, timezone
+    import re
+    from .hdfs_web import HdfsBrowserError, write_file as hdfs_write_file
+    body=await request.json()
+    session_id=re.sub(r'[^A-Za-z0-9_.-]+','_',str(body.get('session_id') or 'session'))[:96] or 'session'
+    payload=body.get('payload') or body
+    payload.setdefault('username', user.username) if isinstance(payload,dict) else None
+    payload.setdefault('saved_at', datetime.now(timezone.utc).isoformat()) if isinstance(payload,dict) else None
+    try:
+        import json
+        return hdfs_write_file(user,user_history_root(user),f'{session_id}.json',json.dumps(payload,ensure_ascii=False,indent=2))
     except AccessDenied as e: raise HTTPException(403,str(e))
     except ValueError as e: raise HTTPException(400,str(e))
     except HdfsBrowserError as e: raise HTTPException(e.status_code,e.message)

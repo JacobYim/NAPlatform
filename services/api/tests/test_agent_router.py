@@ -32,7 +32,7 @@ def _user():
 def _ctx():
     return AgentContext(
         user_id="u1", username="alice", department="ER",
-        hdfs_roots=["/naplatform/users/alice", "/naplatform/departments/ER"],
+        hdfs_roots=["/naplatform/users/alice/workspace", "/naplatform/departments/ER/department_shared"],
         qdrant_filter={"should": [{"key": "department", "match": {"value": "ER"}}]},
         neo4j_filter={"owner_user_id": "u1", "department": "ER"},
         allowed_tools=["hdfs_list", "incident_report"],
@@ -70,7 +70,7 @@ def test_dry_run_default_does_not_invoke_hermes():
     assert "hello world" in result["reply"]
     summary = result["context_summary"]
     assert summary["allowed_tools"] == ["hdfs_list", "incident_report"]
-    assert summary["workspace_root"] == "/naplatform/users/alice"
+    assert summary["workspace_root"] == "/naplatform/users/alice/workspace"
     assert summary["allowed_mcp_servers"] == ["mcp-er-filesystem", "mcp-er-knowledge"]
 
 
@@ -80,7 +80,7 @@ def test_dry_run_client_never_hits_network():
         "request_id": "rid", "message": "hi", "department": "ER",
         "user": {"user_id": "u1", "username": "alice", "email": "a@b.c"},
         "allowed_tools": [], "allowed_mcp_servers": [], "hdfs_roots": [],
-        "qdrant_filter": {}, "neo4j_filter": {}, "workspace_root": "/naplatform/users/alice"})
+        "qdrant_filter": {}, "neo4j_filter": {}, "workspace_root": "/naplatform/users/alice/workspace"})
     assert out["hermes_invoked"] is False and out["request_id"] == "rid"
 
 
@@ -93,7 +93,7 @@ def test_invocation_payload_carries_full_scope():
         assert key in payload
     assert payload["request_id"] == "rid-1" and payload["session_id"] == "sess-1"
     assert payload["user"] == {"user_id": "u1", "username": "alice", "email": "u1@example.com"}
-    assert payload["workspace_root"] == "/naplatform/users/alice"
+    assert payload["workspace_root"] == "/naplatform/users/alice/workspace"
     assert payload["message"] == "msg"
 
 
@@ -114,7 +114,7 @@ def test_enabled_http_client_posts_payload_and_marks_invoked():
     # The posted body carries the RBAC scope the agent must honor.
     assert seen["body"]["message"] == "ping"
     assert seen["body"]["allowed_tools"] == ["hdfs_list", "incident_report"]
-    assert seen["body"]["workspace_root"] == "/naplatform/users/alice"
+    assert seen["body"]["workspace_root"] == "/naplatform/users/alice/workspace"
     assert seen["body"]["request_id"] == "rid-9"
 
 
