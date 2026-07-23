@@ -4,6 +4,11 @@ services:
     environment: {POSTGRES_USER: nap, POSTGRES_PASSWORD: nap, POSTGRES_DB: naplatform}
     ports: ["5432:5432"]
     volumes: [postgres-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nap -d naplatform"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
   redis:
     image: redis:7-alpine
     ports: ["6379:6379"]
@@ -63,6 +68,7 @@ services:
       - ./infra/hadoop/init-hdfs.sh:/bootstrap/init-hdfs.sh:ro
   api:
     build: {context: ./services/api}
+    restart: on-failure
     environment:
       DATABASE_URL: postgresql+psycopg://nap:nap@postgres:5432/naplatform
       REDIS_URL: redis://redis:6379/0
@@ -95,7 +101,17 @@ services:
       NEO4J_USER: neo4j
       NEO4J_PASSWORD: naplatform-password
     ports: ["8080:8080"]
-    depends_on: [postgres, redis, qdrant, neo4j]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=3).read()\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      qdrant: {condition: service_started}
+      neo4j: {condition: service_started}
   # Phase 14/15: one-shot core-webui first-run preseed. This runs BEFORE `ui` starts
   # (ui depends_on it with condition: service_completed_successfully) and shares
   # the `ui-hermes-home` volume, so it can drop the repo-controlled branding /
@@ -174,7 +190,7 @@ services:
       - ui-workspace:/workspace
     depends_on:
       api:
-        condition: service_started
+        condition: service_healthy
       ui-preseed:
         condition: service_completed_successfully
   hermes-er: &agent
