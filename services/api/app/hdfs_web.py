@@ -52,8 +52,8 @@ def _url(path: str, op: str, **params: str) -> str:
     return f"{WEBHDFS_URL}{urllib.parse.quote(path)}?{urllib.parse.urlencode(query)}"
 
 
-def _request_json(path: str, op: str, *, method: str = "GET") -> dict:
-    req = urllib.request.Request(_url(path, op), headers={"Accept": "application/json"}, method=method)
+def _request_json(path: str, op: str, *, method: str = "GET", **params: str) -> dict:
+    req = urllib.request.Request(_url(path, op, **params), headers={"Accept": "application/json"}, method=method)
     try:
         with urllib.request.urlopen(req, timeout=WEBHDFS_TIMEOUT_SECONDS) as resp:
             raw = resp.read().decode("utf-8", errors="replace")
@@ -144,3 +144,36 @@ def write_file(user: User, root: str, rel: str, content: str) -> dict:
         detail = e.read().decode("utf-8", errors="replace")[:300]
         raise HdfsBrowserError(f"WebHDFS CREATE write failed for {path}: HTTP {e.code} {detail}", e.code) from e
     return {"ok": True, "path": rel, "size": len(data), "hdfs_path": path}
+
+
+def make_dir(user: User, root: str, rel: str) -> dict:
+    path = _join(root, rel)
+    assert_hdfs_path_allowed(user, path)
+    _request_json(path, "MKDIRS", method="PUT")
+    return {"ok": True, "path": rel, "hdfs_path": path}
+
+
+def delete_path(user: User, root: str, rel: str, recursive: bool = False) -> dict:
+    path = _join(root, rel)
+    assert_hdfs_path_allowed(user, path)
+    _request_json(path, "DELETE", method="DELETE", recursive="true" if recursive else "false")
+    return {"ok": True, "path": rel, "hdfs_path": path}
+
+
+def rename_path(user: User, root: str, rel: str, new_name: str) -> dict:
+    src = _join(root, rel)
+    safe_name = str(new_name or "").strip()
+    if not safe_name or "/" in safe_name or ".." in safe_name:
+        raise ValueError("Invalid file name")
+    dst = posixpath.join(posixpath.dirname(src), safe_name)
+    assert_hdfs_path_allowed(user, src)
+    assert_hdfs_path_allowed(user, dst)
+    req = urllib.request.Request(_url(src, "RENAME", destination=dst), method="PUT")
+    try:
+        with urllib.request.urlopen(req, timeout=WEBHDFS_TIMEOUT_SECONDS) as resp:
+            resp.read()
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="replace")[:300]
+        raise HdfsBrowserError(f"WebHDFS RENAME failed for {src}: HTTP {e.code} {detail}", e.code) from e
+    new_rel = posixpath.join(posixpath.dirname(rel.strip("/")), safe_name).strip("/")
+    return {"ok": True, "old_path": rel, "new_path": new_rel, "hdfs_path": dst}

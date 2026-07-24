@@ -56,7 +56,7 @@ services:
   ui:
     <<: *model-runner
     environment:
-      HERMES_WEBUI_DEFAULT_MODEL: gemma4:31b
+      HERMES_WEBUI_DEFAULT_MODEL: docker.io/ai/gemma4:31B
       HERMES_INFERENCE_PROVIDER: custom
       OPENAI_API_KEY: no-key-required
   api:

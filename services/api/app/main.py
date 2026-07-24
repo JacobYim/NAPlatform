@@ -242,6 +242,33 @@ async def workspace_hdfs_file_save(request:Request,user:User=Depends(require_act
     except ValueError as e: raise HTTPException(400,str(e))
     except HdfsBrowserError as e: raise HTTPException(e.status_code,e.message)
 
+@app.post('/workspace/hdfs/dir')
+async def workspace_hdfs_dir_create(request:Request,user:User=Depends(require_active)):
+    from .hdfs_web import HdfsBrowserError, make_dir as hdfs_make_dir
+    body=await request.json()
+    try: return hdfs_make_dir(user,str(body.get('root') or ''),str(body.get('path') or ''))
+    except AccessDenied as e: raise HTTPException(403,str(e))
+    except ValueError as e: raise HTTPException(400,str(e))
+    except HdfsBrowserError as e: raise HTTPException(e.status_code,e.message)
+
+@app.delete('/workspace/hdfs/path')
+async def workspace_hdfs_path_delete(request:Request,user:User=Depends(require_active)):
+    from .hdfs_web import HdfsBrowserError, delete_path as hdfs_delete_path
+    body=await request.json()
+    try: return hdfs_delete_path(user,str(body.get('root') or ''),str(body.get('path') or ''),bool(body.get('recursive')))
+    except AccessDenied as e: raise HTTPException(403,str(e))
+    except ValueError as e: raise HTTPException(400,str(e))
+    except HdfsBrowserError as e: raise HTTPException(e.status_code,e.message)
+
+@app.post('/workspace/hdfs/rename')
+async def workspace_hdfs_path_rename(request:Request,user:User=Depends(require_active)):
+    from .hdfs_web import HdfsBrowserError, rename_path as hdfs_rename_path
+    body=await request.json()
+    try: return hdfs_rename_path(user,str(body.get('root') or ''),str(body.get('path') or ''),str(body.get('new_name') or ''))
+    except AccessDenied as e: raise HTTPException(403,str(e))
+    except ValueError as e: raise HTTPException(400,str(e))
+    except HdfsBrowserError as e: raise HTTPException(e.status_code,e.message)
+
 @app.post('/workspace/hdfs/chat-history')
 async def workspace_hdfs_chat_history(request:Request,user:User=Depends(require_active)):
     from datetime import datetime, timezone
