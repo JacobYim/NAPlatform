@@ -90,10 +90,18 @@ fi
 # does not fail with "No LLM provider configured". No real secret is written; the
 # Docker Model Runner/OpenAI-compatible local endpoint accepts a placeholder key.
 if [ -n "${DOCKER_MODEL_RUNNER_BASE_URL:-}" ]; then
+  WEBUI_MODEL_ID="${DOCKER_MODEL_RUNNER_MODEL:-gemma4:31b}"
+  # Docker Model Runner's OpenAI-compatible /models endpoint advertises the
+  # fully-qualified id. Hermes department agents normalize gemma4:31b
+  # internally, but WebUI chat calls AIAgent directly, so seed the exact id the
+  # runner accepts to avoid provider errors like get model '"gemma4:31b"'.
+  if [ "$WEBUI_MODEL_ID" = "gemma4:31b" ]; then
+    WEBUI_MODEL_ID="docker.io/ai/gemma4:31B"
+  fi
   cat > "$HERMES_HOME/config.yaml" <<EOF
 model:
   provider: custom
-  default: ${DOCKER_MODEL_RUNNER_MODEL:-gemma4:31b}
+  default: $WEBUI_MODEL_ID
   base_url: ${DOCKER_MODEL_RUNNER_BASE_URL}
 agent:
   max_turns: 20
@@ -101,7 +109,7 @@ agent:
 approvals:
   mode: off
 EOF
-  echo "[core-webui-preseed] Hermes Agent chat config -> $HERMES_HOME/config.yaml (${DOCKER_MODEL_RUNNER_MODEL:-gemma4:31b} @ $DOCKER_MODEL_RUNNER_BASE_URL)"
+  echo "[core-webui-preseed] Hermes Agent chat config -> $HERMES_HOME/config.yaml ($WEBUI_MODEL_ID @ $DOCKER_MODEL_RUNNER_BASE_URL)"
 fi
 
 # --- setup-completed markers ----------------------------------------------
