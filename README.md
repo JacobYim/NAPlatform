@@ -386,23 +386,28 @@ The earlier _"Gemma4:31B connection cannot be reached"_ failure came from a
 hardcoded internal endpoint. Phase 15 moves the shared endpoint + model into a
 repo-controlled, **non-secret** env file and lets you pick where the runner lives:
 
-- **`config/model-runner/model-runner.env`** (editable, non-secret) holds
-  `DOCKER_MODEL_RUNNER_BASE_URL` and `DOCKER_MODEL_RUNNER_MODEL=gemma4:31b`.
-- `docker-compose.model-runner.yml` loads it via `env_file:` on the API **and every**
-  `hermes-*` agent (one shared model, no per-agent drift), adds
-  `extra_hosts: host.docker.internal:host-gateway`, and embeds **no model-runner
-  service** — the stack only *connects* to a runner, it never starts one.
+- **`config/model-runner/model-runner.env`** (editable, non-secret) holds an
+  indexed candidate list:
+  `DOCKER_MODEL_RUNNER_DEFAULT_INDEX`, `DOCKER_MODEL_RUNNER_0_*`,
+  `DOCKER_MODEL_RUNNER_1_*`, ... . Index `0` is the current workstation Docker
+  Desktop runner via `host.docker.internal:12434`; index `1` is the network
+  workstation `192.168.100.10:12434`.
+- `docker-compose.model-runner.yml` loads it via `env_file:` on the API, WebUI
+  preseed, and every `hermes-*` agent (one selected shared model, no per-agent
+  drift), adds `extra_hosts: host.docker.internal:host-gateway`, and embeds
+  **no model-runner service** — the stack only *connects* to a runner, it never
+  starts one.
 
-Two modes, chosen by editing `DOCKER_MODEL_RUNNER_BASE_URL`:
+Choose the runner by editing `DOCKER_MODEL_RUNNER_DEFAULT_INDEX`:
 
-1. **External / host endpoint** (default `http://host.docker.internal:12434/engines/v1`)
-   — any reachable OpenAI-compatible endpoint. The host-gateway mapping makes the
-   Docker host reachable as `host.docker.internal`; Docker Desktop's Model Runner
-   listens on host TCP `12434`. Point it at a separate box with e.g.
-   `http://my-inference-host:8000/engines/v1`.
-2. **Docker Desktop local model runner** via the internal DNS name
-   `http://model-runner.docker.internal/engines/v1` (Docker Desktop 4.40+ with Model
-   Runner enabled; `docker model pull gemma4:31b`).
+1. **Index 0 — current workstation / Docker Desktop Model Runner**
+   `http://host.docker.internal:12434/engines/v1`.
+2. **Index 1 — network workstation Model Runner**
+   `http://192.168.100.10:12434/engines/v1`.
+
+Each candidate has both a department-agent model (`DOCKER_MODEL_RUNNER_<N>_MODEL`,
+usually `gemma4:31b`) and a WebUI direct Hermes model
+(`DOCKER_MODEL_RUNNER_<N>_WEBUI_MODEL`, usually `docker.io/ai/gemma4:31B`).
 
 To use **no model runner at all**, simply **don't pass** `docker-compose.model-runner.yml`
 — the default stack stays dry-run / model-less.

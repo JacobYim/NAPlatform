@@ -48,6 +48,21 @@ def test_dmr_env_resolves_to_gemma():
     assert mr.base_url == BASE_URL
 
 
+def test_dmr_indexed_candidate_resolves_by_default_index():
+    env = {
+        "HERMES_LLM_PROVIDER": "docker-model-runner",
+        "DOCKER_MODEL_RUNNER_DEFAULT_INDEX": "1",
+        "DOCKER_MODEL_RUNNER_0_BASE_URL": "http://host.docker.internal:12434/engines/v1",
+        "DOCKER_MODEL_RUNNER_0_MODEL": MODEL,
+        "DOCKER_MODEL_RUNNER_1_BASE_URL": "http://192.168.100.10:12434/engines/v1",
+        "DOCKER_MODEL_RUNNER_1_MODEL": MODEL,
+    }
+    mr = resolve_model_runtime(env)
+    assert mr.configured is True
+    assert mr.base_url == "http://192.168.100.10:12434/engines/v1"
+    assert mr.model == MODEL
+
+
 @pytest.mark.parametrize("alias", ["docker_model_runner", "model-runner", "dmr", "MODELRUNNER"])
 def test_provider_aliases_normalize_to_docker_model_runner(alias):
     mr = resolve_model_runtime(_dmr_env(HERMES_LLM_PROVIDER=alias))

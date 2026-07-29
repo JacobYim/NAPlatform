@@ -126,10 +126,12 @@ def test_config_readme_documents_login_and_password_override():
 # ====================== (B) model runner env_file refactor ==================
 def test_model_runner_env_file_holds_shared_gemma_endpoint():
     env = _parse_env(_read(MODEL_RUNNER_ENV))
-    assert env.get("DOCKER_MODEL_RUNNER_MODEL") == MODEL, \
-        f"{MODEL_RUNNER_ENV} must pin the shared model {MODEL}"
-    assert env.get("DOCKER_MODEL_RUNNER_BASE_URL"), \
-        f"{MODEL_RUNNER_ENV} must set an external DOCKER_MODEL_RUNNER_BASE_URL"
+    assert env.get("DOCKER_MODEL_RUNNER_DEFAULT_INDEX") == "0"
+    assert env.get("DOCKER_MODEL_RUNNER_0_MODEL") == MODEL, \
+        f"{MODEL_RUNNER_ENV} must pin candidate 0 shared model {MODEL}"
+    assert env.get("DOCKER_MODEL_RUNNER_0_BASE_URL"), \
+        f"{MODEL_RUNNER_ENV} must set candidate 0 endpoint"
+    assert env.get("DOCKER_MODEL_RUNNER_1_BASE_URL") == "http://192.168.100.10:12434/engines/v1"
     # non-secret editable file
     low = _read(MODEL_RUNNER_ENV).lower()
     for marker in ("password=", "api_key=", "sk-", "secret="):
@@ -164,11 +166,13 @@ def test_model_runner_override_maps_host_gateway(model_runner_compose):
 
 
 def test_all_agents_share_one_model_from_config():
-    """Exactly one shared model line in the config => all agents share gemma4:31b."""
+    """All indexed candidates share gemma4:31b by default (no per-agent drift)."""
     lines = [ln for ln in _read(MODEL_RUNNER_ENV).splitlines()
-             if ln.strip().startswith("DOCKER_MODEL_RUNNER_MODEL=")]
-    assert len(lines) == 1 and MODEL in lines[0], \
-        "the shared model must be defined exactly once (no per-agent drift)"
+             if ln.strip().startswith("DOCKER_MODEL_RUNNER_")
+             and "_WEBUI_MODEL=" not in ln
+             and "_MODEL=" in ln]
+    assert lines and all(MODEL in ln for ln in lines), \
+        "all shared model-runner candidates must use gemma4:31b by default"
 
 
 def test_default_stack_stays_model_less():

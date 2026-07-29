@@ -16,31 +16,22 @@
 #   docker compose -f docker-compose.yml -f docker-compose.model-runner.yml up -d
 #   docker compose -f docker-compose.yml -f docker-compose.model-runner.yml config
 #
-# Phase 15 — the endpoint + model are NO LONGER hardcoded here. They come from the
-# repo-controlled, non-secret env file `config/model-runner/model-runner.env`
-# (loaded via `env_file:` below). Edit THAT file to choose the endpoint — this
-# compose file only declares the provider, the enablement flags, the env_file, and
-# a host-gateway mapping. There is intentionally NO embedded model-runner service:
-# the stack never tries to start a model runner of its own; it only CONNECTS to one.
-#
-# Two modes (set DOCKER_MODEL_RUNNER_BASE_URL in config/model-runner/model-runner.env):
-#   1) External / host endpoint (default). `extra_hosts: host.docker.internal:
-#      host-gateway` makes the Docker host reachable as host.docker.internal from
-#      inside the containers; Docker Desktop's Model Runner listens on host TCP
-#      12434, so the default http://host.docker.internal:12434/engines/v1 reaches it
-#      even when the internal DNS name does not resolve. This is the fix for the
-#      earlier "gemma4:31b connection cannot be reached" error.
-#   2) Docker Desktop internal DNS: http://model-runner.docker.internal/engines/v1.
-#
-# Model name is `gemma4:31b` EXACTLY as requested; it lives in the env file so all
-# agents share one value with no drift. Run-time env still overrides the file, e.g.
-#   DOCKER_MODEL_RUNNER_BASE_URL=... docker compose -f ... -f ... up -d
+# Phase 15+ — the endpoint + model are configured in the repo-controlled,
+# non-secret env file `config/model-runner/model-runner.env` (loaded via
+# `env_file:` below). The file now contains an indexed candidate list:
+#   DOCKER_MODEL_RUNNER_DEFAULT_INDEX=0
+#   DOCKER_MODEL_RUNNER_0_BASE_URL=http://host.docker.internal:12434/engines/v1
+#   DOCKER_MODEL_RUNNER_1_BASE_URL=http://192.168.100.10:12434/engines/v1
+# and matching MODEL / WEBUI_MODEL values. Edit the index to switch runners.
+# This compose file only declares provider enablement and host-gateway mapping.
+# There is intentionally NO embedded model-runner service: the stack never tries
+# to start a model runner of its own; it only CONNECTS to one.
 #
 # NOTE: a newer Compose additionally supports a top-level `models:` element and a
 # per-service `models:` attribute for Docker Model Runner. That is intentionally
 # NOT used here so `docker compose config` validates on older Compose too; the
 # env-file + env-var wiring below is the portable, version-safe form.
-#
+
 x-model-runner: &model-runner
   # Shared endpoint + model come from the repo-controlled, non-secret env file.
   env_file:
@@ -56,7 +47,6 @@ services:
   ui:
     <<: *model-runner
     environment:
-      HERMES_WEBUI_DEFAULT_MODEL: docker.io/ai/gemma4:31B
       HERMES_INFERENCE_PROVIDER: custom
       OPENAI_API_KEY: no-key-required
   api:

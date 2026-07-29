@@ -79,27 +79,76 @@ _DMR_PROVIDER_ALIASES = ("docker-model-runner", "docker_model_runner",
                          "model-runner", "modelrunner", "dmr")
 
 
+def _model_runner_candidates(env: dict | None = None) -> list[dict]:
+    """Return numbered, non-secret Docker Model Runner candidates."""
+    env = os.environ if env is None else env
+    candidates: list[dict] = []
+    for idx in range(20):
+        base_url = (env.get(f"DOCKER_MODEL_RUNNER_{idx}_BASE_URL") or "").strip()
+        model = (env.get(f"DOCKER_MODEL_RUNNER_{idx}_MODEL") or "").strip()
+        if not base_url and not model:
+            continue
+        candidates.append({
+            "index": idx,
+            "name": (env.get(f"DOCKER_MODEL_RUNNER_{idx}_NAME") or f"runner-{idx}").strip(),
+            "base_url": base_url,
+            "model": model,
+            "webui_model": (env.get(f"DOCKER_MODEL_RUNNER_{idx}_WEBUI_MODEL") or "").strip(),
+        })
+    return candidates
+
+
+def _selected_model_runner_from_list(env: dict | None = None) -> dict | None:
+    env = os.environ if env is None else env
+    candidates = _model_runner_candidates(env)
+    if not candidates:
+        return None
+    try:
+        selected = int((env.get("DOCKER_MODEL_RUNNER_DEFAULT_INDEX") or "0").strip())
+    except (TypeError, ValueError):
+        selected = 0
+    for item in candidates:
+        if item["index"] == selected and item.get("base_url") and item.get("model"):
+            return item
+    for item in candidates:
+        if item.get("base_url") and item.get("model"):
+            return item
+    return None
+
+
 def model_runtime_status() -> dict:
     """Redacted view of the shared LLM / Docker Model Runner config (secret-free).
 
-    All department Hermes agents share one model via the same envs
-    (``HERMES_LLM_PROVIDER``/``DOCKER_MODEL_RUNNER_BASE_URL``/
-    ``DOCKER_MODEL_RUNNER_MODEL`` — OpenAI-compatible fallbacks accepted). This
-    lets an admin confirm the model runner is configured without any secret
-    leaving the process: the base URL is redacted (userinfo/query stripped) and
-    the API key is reported only as a boolean. ``configured`` is true only when a
-    provider, base URL, and model are all present; the default stack (none set)
-    reports ``configured=false`` and stays dry-run safe.
+    All department Hermes agents share one selected model-runner candidate from
+    ``DOCKER_MODEL_RUNNER_<N>_*`` entries, unless a single-value runtime env
+    override is supplied. The base URL is redacted (userinfo/query stripped) and
+    the API key is reported only as a boolean.
     """
     provider = (os.environ.get("HERMES_LLM_PROVIDER")
                 or os.environ.get("LLM_PROVIDER") or "").strip().lower()
     if provider in _DMR_PROVIDER_ALIASES:
         provider = "docker-model-runner"
+    selected_runner = _selected_model_runner_from_list()
+    listed_base_url = (selected_runner or {}).get("base_url", "")
+    listed_model = (selected_runner or {}).get("model", "")
     base_url = (os.environ.get("DOCKER_MODEL_RUNNER_BASE_URL")
+                or listed_base_url
                 or os.environ.get("OPENAI_BASE_URL") or "").strip()
     model = (os.environ.get("DOCKER_MODEL_RUNNER_MODEL")
+             or listed_model
              or os.environ.get("OPENAI_MODEL") or "").strip()
     api_key_present = bool((os.environ.get("OPENAI_API_KEY") or "").strip())
+    selected_index = selected_runner.get("index") if selected_runner else None
+    candidates = []
+    for item in _model_runner_candidates():
+        candidates.append({
+            "index": item["index"],
+            "name": item["name"],
+            "base_url": _redact_url(item["base_url"]) or None,
+            "model": item["model"] or None,
+            "webui_model": item["webui_model"] or None,
+            "selected": item["index"] == selected_index,
+        })
     return {
         "provider": provider or None,
         "configured": bool(provider and base_url and model),
@@ -107,6 +156,8 @@ def model_runtime_status() -> dict:
         "model": model or None,
         "openai_compatible": True,
         "api_key_present": api_key_present,
+        "selected_runner_index": selected_index,
+        "runners": candidates,
     }
 
 

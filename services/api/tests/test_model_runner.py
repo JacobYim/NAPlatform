@@ -37,7 +37,9 @@ def _make_active_user(email, username, departments):
 def test_default_runtime_is_unconfigured(monkeypatch):
     for var in ("HERMES_LLM_PROVIDER", "LLM_PROVIDER", "DOCKER_MODEL_RUNNER_BASE_URL",
                 "OPENAI_BASE_URL", "DOCKER_MODEL_RUNNER_MODEL", "OPENAI_MODEL",
-                "OPENAI_API_KEY"):
+                "OPENAI_API_KEY", "DOCKER_MODEL_RUNNER_DEFAULT_INDEX",
+                "DOCKER_MODEL_RUNNER_0_BASE_URL", "DOCKER_MODEL_RUNNER_0_MODEL",
+                "DOCKER_MODEL_RUNNER_1_BASE_URL", "DOCKER_MODEL_RUNNER_1_MODEL"):
         monkeypatch.delenv(var, raising=False)
     status = config.model_runtime_status()
     assert status["configured"] is False
@@ -53,6 +55,26 @@ def test_dmr_runtime_reports_gemma(monkeypatch):
     assert status["provider"] == "docker-model-runner"
     assert status["model"] == MODEL
     assert status["openai_compatible"] is True
+
+
+def test_dmr_runtime_uses_selected_indexed_candidate(monkeypatch):
+    for var in ("DOCKER_MODEL_RUNNER_BASE_URL", "DOCKER_MODEL_RUNNER_MODEL"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("HERMES_LLM_PROVIDER", "docker-model-runner")
+    monkeypatch.setenv("DOCKER_MODEL_RUNNER_DEFAULT_INDEX", "1")
+    monkeypatch.setenv("DOCKER_MODEL_RUNNER_0_NAME", "local")
+    monkeypatch.setenv("DOCKER_MODEL_RUNNER_0_BASE_URL", "http://host.docker.internal:12434/engines/v1")
+    monkeypatch.setenv("DOCKER_MODEL_RUNNER_0_MODEL", MODEL)
+    monkeypatch.setenv("DOCKER_MODEL_RUNNER_1_NAME", "workstation")
+    monkeypatch.setenv("DOCKER_MODEL_RUNNER_1_BASE_URL", "http://192.168.100.10:12434/engines/v1")
+    monkeypatch.setenv("DOCKER_MODEL_RUNNER_1_MODEL", MODEL)
+
+    status = config.model_runtime_status()
+
+    assert status["configured"] is True
+    assert status["base_url"] == "http://192.168.100.10:12434/engines/v1"
+    assert status["selected_runner_index"] == 1
+    assert [runner["selected"] for runner in status["runners"]] == [False, True]
 
 
 def test_runtime_status_redacts_secrets(monkeypatch):

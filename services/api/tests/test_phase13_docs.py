@@ -31,13 +31,14 @@ def _read(rel: str) -> str:
 
 
 # --- compose override + env file (Phase 15 refactor) ------------------------
-def test_model_runner_env_file_pins_gemma_external_endpoint():
-    """Phase 15: the shared endpoint + model live in a repo-controlled env file."""
+def test_model_runner_env_file_declares_indexed_candidates():
+    """The shared endpoints/models live in a repo-controlled candidate list."""
     env_text = _read(MODEL_RUNNER_ENV_FILE)
-    assert f"DOCKER_MODEL_RUNNER_MODEL={MODEL}" in env_text, \
-        f"{MODEL_RUNNER_ENV_FILE} must pin DOCKER_MODEL_RUNNER_MODEL={MODEL}"
-    assert "DOCKER_MODEL_RUNNER_BASE_URL=" in env_text, \
-        f"{MODEL_RUNNER_ENV_FILE} must set an external DOCKER_MODEL_RUNNER_BASE_URL"
+    assert "DOCKER_MODEL_RUNNER_DEFAULT_INDEX=0" in env_text
+    assert f"DOCKER_MODEL_RUNNER_0_MODEL={MODEL}" in env_text
+    assert "DOCKER_MODEL_RUNNER_0_BASE_URL=http://host.docker.internal:12434/engines/v1" in env_text
+    assert "DOCKER_MODEL_RUNNER_1_BASE_URL=http://192.168.100.10:12434/engines/v1" in env_text
+    assert "DOCKER_MODEL_RUNNER_1_WEBUI_MODEL=docker.io/ai/gemma4:31B" in env_text
     # No secret belongs in this editable, non-secret file.
     low = env_text.lower()
     for marker in ('"password"', "password=", "api_key=", "sk-", "secret="):
@@ -66,13 +67,14 @@ def test_model_runner_compose_uses_env_file_and_no_embedded_service():
 
 
 def test_model_runner_all_agents_share_model_from_config():
-    """All agents + api share ONE gemma4:31b, sourced from the single env file
-    (no per-agent model divergence)."""
+    """All agents + api share the selected model sourced from the single env file."""
     env_text = _read(MODEL_RUNNER_ENV_FILE)
     model_lines = [ln for ln in env_text.splitlines()
-                   if ln.strip().startswith("DOCKER_MODEL_RUNNER_MODEL=")]
-    assert len(model_lines) == 1, "the shared model must be declared exactly once in config"
-    assert MODEL in model_lines[0], f"the single shared model must be {MODEL}"
+                   if ln.strip().startswith("DOCKER_MODEL_RUNNER_")
+                   and "_WEBUI_MODEL=" not in ln
+                   and "_MODEL=" in ln]
+    assert model_lines, "at least one shared model-runner candidate must be declared"
+    assert all(MODEL in ln for ln in model_lines), f"all declared candidates should use {MODEL} by default"
 
 
 def test_default_compose_stays_model_less():

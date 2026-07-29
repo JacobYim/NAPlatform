@@ -82,20 +82,43 @@ class ModelRuntime:
         }
 
 
+def _selected_model_runner_from_list(env: dict) -> tuple[str, str]:
+    """Return (base_url, model) from numbered DOCKER_MODEL_RUNNER_<N> entries."""
+    try:
+        selected = int((env.get("DOCKER_MODEL_RUNNER_DEFAULT_INDEX") or "0").strip())
+    except (TypeError, ValueError):
+        selected = 0
+    base_url = (env.get(f"DOCKER_MODEL_RUNNER_{selected}_BASE_URL") or "").strip()
+    model = (env.get(f"DOCKER_MODEL_RUNNER_{selected}_MODEL") or "").strip()
+    if base_url and model:
+        return base_url, model
+    # Fallback to first complete candidate in index order if selected is absent.
+    for idx in range(20):
+        base_url = (env.get(f"DOCKER_MODEL_RUNNER_{idx}_BASE_URL") or "").strip()
+        model = (env.get(f"DOCKER_MODEL_RUNNER_{idx}_MODEL") or "").strip()
+        if base_url and model:
+            return base_url, model
+    return "", ""
+
+
 def resolve_model_runtime(env: dict | None = None) -> ModelRuntime:
     """Resolve the shared model runtime from env, normalizing DMR aliases.
 
-    Docker Model Runner envs win; OpenAI-compatible envs are accepted as a
-    fallback so a plain OpenAI-compatible endpoint also works. An unset provider
-    (or a missing base URL/model) yields an unconfigured, dry-run-safe runtime.
+    Docker Model Runner list entries (``DOCKER_MODEL_RUNNER_<N>_*``) provide the
+    repo-controlled default. Explicit single-value envs still win for one-off
+    overrides. An unset provider/base/model yields an unconfigured, dry-run-safe
+    runtime.
     """
     env = os.environ if env is None else env
     provider = (env.get("HERMES_LLM_PROVIDER") or env.get("LLM_PROVIDER") or "").strip().lower()
     if provider in _DMR_PROVIDER_ALIASES:
         provider = "docker-model-runner"
+    listed_base_url, listed_model = _selected_model_runner_from_list(env)
     base_url = (env.get("DOCKER_MODEL_RUNNER_BASE_URL")
+                or listed_base_url
                 or env.get("OPENAI_BASE_URL") or "").strip()
     model = (env.get("DOCKER_MODEL_RUNNER_MODEL")
+             or listed_model
              or env.get("OPENAI_MODEL") or "").strip()
     return ModelRuntime(
         provider=provider,

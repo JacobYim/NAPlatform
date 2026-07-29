@@ -89,9 +89,32 @@ fi
 # minimal Hermes config into the shared HERMES_HOME so AIAgent has a provider and
 # does not fail with "No LLM provider configured". No real secret is written; the
 # Docker Model Runner/OpenAI-compatible local endpoint accepts a placeholder key.
-if [ -n "${DOCKER_MODEL_RUNNER_BASE_URL:-}" ]; then
-  WEBUI_MODEL_ID="${DOCKER_MODEL_RUNNER_MODEL:-gemma4:31b}"
-  # Docker Model Runner's OpenAI-compatible /models endpoint advertises the
+resolve_model_runner_selection() {
+  SELECTED_INDEX="${DOCKER_MODEL_RUNNER_DEFAULT_INDEX:-0}"
+  eval SELECTED_BASE="\${DOCKER_MODEL_RUNNER_${SELECTED_INDEX}_BASE_URL:-}"
+  eval SELECTED_MODEL="\${DOCKER_MODEL_RUNNER_${SELECTED_INDEX}_MODEL:-}"
+  eval SELECTED_WEBUI_MODEL="\${DOCKER_MODEL_RUNNER_${SELECTED_INDEX}_WEBUI_MODEL:-}"
+  if [ -z "$SELECTED_BASE" ] || [ -z "$SELECTED_MODEL" ]; then
+    for idx in 0 1 2 3 4 5 6 7 8 9; do
+      eval CANDIDATE_BASE="\${DOCKER_MODEL_RUNNER_${idx}_BASE_URL:-}"
+      eval CANDIDATE_MODEL="\${DOCKER_MODEL_RUNNER_${idx}_MODEL:-}"
+      if [ -n "$CANDIDATE_BASE" ] && [ -n "$CANDIDATE_MODEL" ]; then
+        SELECTED_INDEX="$idx"
+        SELECTED_BASE="$CANDIDATE_BASE"
+        SELECTED_MODEL="$CANDIDATE_MODEL"
+        eval SELECTED_WEBUI_MODEL="\${DOCKER_MODEL_RUNNER_${idx}_WEBUI_MODEL:-}"
+        break
+      fi
+    done
+  fi
+  DOCKER_MODEL_RUNNER_RESOLVED_BASE_URL="${DOCKER_MODEL_RUNNER_BASE_URL:-$SELECTED_BASE}"
+  DOCKER_MODEL_RUNNER_RESOLVED_MODEL="${DOCKER_MODEL_RUNNER_MODEL:-$SELECTED_MODEL}"
+  DOCKER_MODEL_RUNNER_RESOLVED_WEBUI_MODEL="${HERMES_WEBUI_DEFAULT_MODEL:-${SELECTED_WEBUI_MODEL:-$DOCKER_MODEL_RUNNER_RESOLVED_MODEL}}"
+}
+resolve_model_runner_selection
+if [ -n "${DOCKER_MODEL_RUNNER_RESOLVED_BASE_URL:-}" ]; then
+  WEBUI_MODEL_ID="${DOCKER_MODEL_RUNNER_RESOLVED_WEBUI_MODEL:-gemma4:31b}"
+
   # fully-qualified id. Hermes department agents normalize gemma4:31b
   # internally, but WebUI chat calls AIAgent directly, so seed the exact id the
   # runner accepts to avoid provider errors like get model '"gemma4:31b"'.
@@ -102,14 +125,14 @@ if [ -n "${DOCKER_MODEL_RUNNER_BASE_URL:-}" ]; then
 model:
   provider: custom
   default: $WEBUI_MODEL_ID
-  base_url: ${DOCKER_MODEL_RUNNER_BASE_URL}
+  base_url: ${DOCKER_MODEL_RUNNER_RESOLVED_BASE_URL}
 agent:
   max_turns: 20
   disabled_toolsets: []
 approvals:
   mode: off
 EOF
-  echo "[core-webui-preseed] Hermes Agent chat config -> $HERMES_HOME/config.yaml ($WEBUI_MODEL_ID @ $DOCKER_MODEL_RUNNER_BASE_URL)"
+  echo "[core-webui-preseed] Hermes Agent chat config -> $HERMES_HOME/config.yaml ($WEBUI_MODEL_ID @ $DOCKER_MODEL_RUNNER_RESOLVED_BASE_URL; runner index ${SELECTED_INDEX:-0})"
 fi
 
 # --- setup-completed markers ----------------------------------------------
