@@ -530,6 +530,16 @@ is saved locally, the UI posts the full session transcript to
 `/naplatform/users/<username>/chat_history/<session_id>.json`. HDFS/API failures
 are logged but do not fail the browser chat turn.
 
+Workspace writes during chat use the same HDFS aggregate root. Text edits from the
+preview editor call `/api/file/save`, which maps paths such as
+`workspace/report.md` to `/naplatform/users/<username>/workspace/report.md` and
+`department_shared-QC/foo.md` to
+`/naplatform/departments/QC/department_shared/foo.md`. Chat attachments in an HDFS
+session are uploaded to the current visible HDFS directory (default:
+`workspace/<filename>`) instead of being left only in the WebUI container's local
+attachment inbox; the upload response includes both the UI-relative path and the
+real `hdfs_path`, and the Workspace panel refreshes after upload.
+
 The same data can be checked from Windows Git Bash with the Hadoop CLI inside the
 NameNode container. Important: set `MSYS_NO_PATHCONV=1`; otherwise Git Bash may
 rewrite `/naplatform/...` into a Windows `C:` path before Docker sees it.

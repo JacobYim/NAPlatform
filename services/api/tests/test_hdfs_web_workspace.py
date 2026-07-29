@@ -96,6 +96,47 @@ def test_workspace_hdfs_file_reads_via_webhdfs(monkeypatch):
     assert r.json()["content"] == "hello"
 
 
+def test_workspace_hdfs_file_save_accepts_base64_bytes(monkeypatch):
+    headers, user = _login_active("uploadhdfs")
+    calls = []
+
+    def fake_request_json(path, op, **kwargs):
+        calls.append((path, op, kwargs))
+        if op == "MKDIRS":
+            return {}
+        raise AssertionError(op)
+
+    class FakeResponse:
+        status = 200
+        headers = {}
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def read(self, *_): return b""
+
+    seen_payloads = []
+
+    def fake_urlopen(req, timeout=None):
+        if getattr(req, "data", None):
+            seen_payloads.append(req.data)
+        return FakeResponse()
+
+    monkeypatch.setattr(hdfs_web, "_request_json", fake_request_json)
+    monkeypatch.setattr(hdfs_web.urllib.request, "urlopen", fake_urlopen)
+    with TestClient(app) as client:
+        r = client.post(
+            "/workspace/hdfs/file",
+            headers=headers,
+            json={
+                "root": f"/naplatform/users/{user.username}/workspace",
+                "path": "upload.bin",
+                "content_base64": "AAECAw==",
+            },
+        )
+    assert r.status_code == 200, r.text
+    assert r.json()["size"] == 4
+    assert seen_payloads == [b"\x00\x01\x02\x03"]
+
+
 def test_agent_context_uses_only_workspace_department_shared_and_history_roots():
     headers, user = _login_active("ctxhdfs", "QC")
     with TestClient(app) as client:

@@ -235,9 +235,14 @@ def workspace_hdfs_file(root:str,path:str,user:User=Depends(require_active)):
 
 @app.post('/workspace/hdfs/file')
 async def workspace_hdfs_file_save(request:Request,user:User=Depends(require_active)):
-    from .hdfs_web import HdfsBrowserError, write_file as hdfs_write_file
+    from .hdfs_web import HdfsBrowserError, write_file as hdfs_write_file, write_file_bytes as hdfs_write_file_bytes
     body=await request.json()
-    try: return hdfs_write_file(user,str(body.get('root') or ''),str(body.get('path') or ''),str(body.get('content') or ''))
+    try:
+        if body.get('content_base64') is not None:
+            import base64
+            data=base64.b64decode(str(body.get('content_base64') or ''),validate=True)
+            return hdfs_write_file_bytes(user,str(body.get('root') or ''),str(body.get('path') or ''),data)
+        return hdfs_write_file(user,str(body.get('root') or ''),str(body.get('path') or ''),str(body.get('content') or ''))
     except AccessDenied as e: raise HTTPException(403,str(e))
     except ValueError as e: raise HTTPException(400,str(e))
     except HdfsBrowserError as e: raise HTTPException(e.status_code,e.message)

@@ -119,13 +119,13 @@ def read_file(user: User, root: str, rel: str) -> dict:
     return {"path": rel, "content": content, "size": len(raw), "lines": content.count("\n") + 1, "hdfs_path": path}
 
 
-def write_file(user: User, root: str, rel: str, content: str) -> dict:
+def write_file_bytes(user: User, root: str, rel: str, data: bytes) -> dict:
     path = _join(root, rel)
     assert_hdfs_path_allowed(user, path)
     parent = posixpath.dirname(path)
     assert_hdfs_path_allowed(user, parent)
     _request_json(parent, "MKDIRS", method="PUT")
-    data = (content or "").encode("utf-8")
+    data = data or b""
     first = _url(path, "CREATE", overwrite="true")
     req = urllib.request.Request(first, headers={"Content-Type": "application/octet-stream"}, method="PUT")
     try:
@@ -146,11 +146,16 @@ def write_file(user: User, root: str, rel: str, content: str) -> dict:
     return {"ok": True, "path": rel, "size": len(data), "hdfs_path": path}
 
 
+def write_file(user: User, root: str, rel: str, content: str) -> dict:
+    return write_file_bytes(user, root, rel, (content or "").encode("utf-8"))
+
+
 def make_dir(user: User, root: str, rel: str) -> dict:
     path = _join(root, rel)
     assert_hdfs_path_allowed(user, path)
     _request_json(path, "MKDIRS", method="PUT")
     return {"ok": True, "path": rel, "hdfs_path": path}
+
 
 
 def delete_path(user: User, root: str, rel: str, recursive: bool = False) -> dict:
