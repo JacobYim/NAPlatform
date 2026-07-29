@@ -181,24 +181,16 @@ services:
       # email + password, registration creates a pending API account, and only an
       # admin-approved active user receives the local WebUI cookie and reaches chat.
       HERMES_WEBUI_AUTH_MODE: naplatform
-      # WebUI chat needs the real Hermes Agent source on sys.path so it can import
-      # run_agent.AIAgent. On this Windows dev host the default points at the
-      # Hermes install under $HOME/AppData/Local/hermes/hermes-agent; override
-      # HERMES_AGENT_DIR if your Hermes source lives elsewhere.
-      HERMES_WEBUI_AGENT_DIR: /home/hermeswebui/.hermes/hermes-agent
+      # WebUI chat imports Hermes Agent from the WebUI image itself. Do not mount
+      # the host user's local ~/.hermes/hermes-agent; Docker deployments must be
+      # reproducible without a local Hermes checkout.
+      HERMES_WEBUI_AGENT_DIR: /opt/hermes
     ports:
       # Default UI URL is http://localhost:3000. If port 3000 is already in use,
       # run with UI_HOST_PORT=3001 and open http://localhost:3001 instead.
       - "${UI_HOST_PORT:-3000}:8787"
     volumes:
       - ui-hermes-home:/home/hermeswebui/.hermes
-      # Use long bind syntax so Windows drive-letter paths (C:\...) are not
-      # parsed as extra colon-separated volume fields. In WSL2, export
-      # HERMES_AGENT_DIR=/mnt/c/Users/<user>/AppData/Local/hermes/hermes-agent.
-      - type: bind
-        source: ${HERMES_AGENT_DIR:-C:/Users/jyim67/AppData/Local/hermes/hermes-agent}
-        target: /home/hermeswebui/.hermes/hermes-agent
-        read_only: true
       - ui-workspace:/workspace
     depends_on:
       api:
@@ -209,7 +201,7 @@ services:
     build: {context: ./services/hermes-agent}
     environment: {DEPARTMENT: ER, HERMES_PROFILE: ER, API_BASE_URL: 'http://api:8080', HDFS_NAMENODE: 'hdfs://hdfs-namenode:9000'}
     # Phase 07: agents serve HTTP internally only (no host port); the API reaches
-    # them by service name. Set HERMES_AGENT_EXECUTION_ENABLED=true to drive the
+    # them by service name.
     # real Hermes CLI (disabled by default — deterministic response).
     expose: ["8080"]
     healthcheck:
