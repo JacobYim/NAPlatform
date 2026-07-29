@@ -192,7 +192,13 @@ services:
       - "${UI_HOST_PORT:-3000}:8787"
     volumes:
       - ui-hermes-home:/home/hermeswebui/.hermes
-      - ${HERMES_AGENT_DIR:-C:/Users/jyim67/AppData/Local/hermes/hermes-agent}:/home/hermeswebui/.hermes/hermes-agent:ro
+      # Use long bind syntax so Windows drive-letter paths (C:\...) are not
+      # parsed as extra colon-separated volume fields. In WSL2, export
+      # HERMES_AGENT_DIR=/mnt/c/Users/<user>/AppData/Local/hermes/hermes-agent.
+      - type: bind
+        source: ${HERMES_AGENT_DIR:-C:/Users/jyim67/AppData/Local/hermes/hermes-agent}
+        target: /home/hermeswebui/.hermes/hermes-agent
+        read_only: true
       - ui-workspace:/workspace
     depends_on:
       api:

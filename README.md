@@ -481,13 +481,35 @@ CORE_WEBUI_CONTEXT=../core-webui UI_HOST_PORT=3001 \
 If chat shows `No LLM provider configured`, rerun the full model-runner compose
 command above so `ui-preseed` rewrites `/home/hermeswebui/.hermes/config.yaml`.
 If chat shows `AIAgent not available`, set `HERMES_AGENT_DIR` to a checkout or
-install of Hermes Agent that contains `run_agent.py`, for example:
+install of Hermes Agent that contains `run_agent.py`. The bind mount uses Docker
+Compose long syntax so Windows drive-letter paths are safe, but the source path
+must match the shell you run Compose from.
+
+WSL2 / Ubuntu shell:
 
 ```bash
-HERMES_AGENT_DIR="$HOME/AppData/Local/hermes/hermes-agent" \
+export HERMES_AGENT_DIR=/mnt/c/Users/jyim67/AppData/Local/hermes/hermes-agent
 CORE_WEBUI_CONTEXT=../core-webui UI_HOST_PORT=3001 \
   docker compose -f docker-compose.yml -f docker-compose.model-runner.yml \
-  up -d --build --remove-orphans ui
+  up -d --build --remove-orphans
+```
+
+Windows PowerShell:
+
+```powershell
+$env:HERMES_AGENT_DIR = 'C:\Users\jyim67\AppData\Local\hermes\hermes-agent'
+$env:CORE_WEBUI_CONTEXT = '..\core-webui'
+$env:UI_HOST_PORT = '3001'
+docker compose -f docker-compose.yml -f docker-compose.model-runner.yml up -d --build --remove-orphans
+```
+
+Windows Git Bash / MSYS shell:
+
+```bash
+MSYS_NO_PATHCONV=1 HERMES_AGENT_DIR=/mnt/c/Users/jyim67/AppData/Local/hermes/hermes-agent \
+CORE_WEBUI_CONTEXT=../core-webui UI_HOST_PORT=3001 \
+  docker compose -f docker-compose.yml -f docker-compose.model-runner.yml \
+  up -d --build --remove-orphans
 ```
 
 ### HDFS / Hadoop interface: workspace contents 확인
