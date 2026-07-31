@@ -4,6 +4,148 @@ Docker Compose based multi-department Hermes Agent platform for ER, IT, EHS, QC.
 
 Includes PRD/architecture, FastAPI RBAC scaffold, Redis/Postgres/Qdrant/Neo4j/HDFS Compose topology, core-webui runtime UI integration, department Hermes agent containers, and tests.
 
+## Current release handoff — login-scoped Hermes + HDFS workspace stack
+
+This repository now contains a runnable handoff baseline for the NAPlatform/HMGMA
+multi-user Hermes platform. The intended operator flow is:
+
+1. Start the full Compose stack with the commands below.
+2. User logs in through the NAPlatform WebUI login page.
+3. Login creates/binds a WebUI session to that user's NAPlatform identity,
+   departments, allowed tools/MCP servers, and HDFS child-root workspace scope.
+4. Chat requests are sent from core-webui to the configured model runner/Hermes
+   path; completed chats are backed up to the user's HDFS `chat_history` root.
+5. The Workspace panel shows the user's HDFS personal workspace plus department
+   shared roots as an aggregate view. It must not expose parent roots.
+
+### One-command local startup
+
+Use Windows Git Bash from this repository root. Do not append `ui`, `api`, or
+other service names at the end; that starts only a subset of the stack.
+
+```bash
+CORE_WEBUI_CONTEXT=../core-webui UI_HOST_PORT=3001 \
+  docker compose -f docker-compose.yml -f docker-compose.model-runner.yml \
+  up -d --build --remove-orphans
+```
+
+Health checks:
+
+```bash
+curl -fsS http://localhost:8080/health
+curl -fsS http://localhost:3001/health
+CORE_WEBUI_CONTEXT=../core-webui UI_HOST_PORT=3001 \
+  docker compose -f docker-compose.yml -f docker-compose.model-runner.yml ps
+```
+
+Expected important services: `api`, `ui`, `postgres`, `redis`, `qdrant`, `neo4j`,
+`hdfs-namenode`, `hdfs-datanode-1/2/3`, and `hermes-er/it/ehs/qc`. API/UI and
+Hermes services should become healthy; HDFS/Qdrant/Neo4j are long-running backing
+services even when Compose does not report a formal health column for all of them.
+
+### Login and routing baseline
+
+- WebUI: `http://localhost:3001/login`
+- API: `http://localhost:8080`
+- NameNode UI: `http://localhost:9870`
+- Seed admin email: `admin@example.com`
+- Seed admin password comes from `ADMIN_PASSWORD`; local dev defaults are defined
+  in `services/api/app/config.py`/Compose environment. Do not commit real
+  operator passwords.
+
+Admins land on the NAPlatform admin hub after login. Non-admin users enter the
+chat workspace. Opening Chat Workspace should create or attach the default HDFS
+aggregate session automatically.
+
+### HDFS workspace contract
+
+A user has an operator-visible home under `/naplatform/users/<username>`, but the
+agent/WebUI may only use child roots:
+
+```text
+/naplatform/users/<username>/workspace
+/naplatform/users/<username>/chat_history
+/naplatform/departments/<DEP>/department_shared
+```
+
+The WebUI aggregate workspace is represented as:
+
+```text
+hdfs://naplatform-roots
+```
+
+and should show entries like:
+
+```text
+workspace
+chat_history
+department_shared-QC
+```
+
+Parent paths such as `/naplatform/users/<username>` and
+`/naplatform/departments/<DEP>` must remain denied to the agent/UI file APIs.
+
+### Chat, upload, save, and history behavior
+
+- Chat request path: core-webui `/api/chat/start` + `/api/chat/stream`.
+- Default model runner model id for direct core-webui chat:
+  `docker.io/ai/gemma4:31B` with provider `custom`.
+- HDFS chat backup path:
+  `/naplatform/users/<username>/chat_history/<session_id>.json`.
+- Workspace text save: `/api/file/save` maps `workspace/foo.md` to the user's
+  HDFS personal workspace and `department_shared-<DEP>/foo.md` to that
+  department's shared HDFS root.
+- Chat/file upload in an HDFS session writes to the currently visible HDFS
+  workspace directory, defaulting to `workspace/<filename>`, and returns a real
+  `hdfs_path` so the agent and Workspace panel see the same file.
+- HDFS/API backup failures are best-effort for chat history: they are logged but
+  should not fail the browser chat turn.
+
+### Release verification checklist
+
+Before handing the system to another developer/operator, run:
+
+```bash
+# API and Hermes-agent tests
+pytest -q
+
+# core-webui tests from the sibling repo
+cd ../core-webui
+python -m compileall -q api static
+pytest -q tests/test_chat_upload_attachment_paths.py \
+  tests/test_naplatform_history_backup.py \
+  tests/test_naplatform_hdfs_artifacts_static.py
+```
+
+Then verify the live stack:
+
+```bash
+curl -fsS http://localhost:8080/health
+curl -fsS http://localhost:3001/health
+MSYS_NO_PATHCONV=1 CORE_WEBUI_CONTEXT=../core-webui UI_HOST_PORT=3001 \
+  docker compose -f docker-compose.yml -f docker-compose.model-runner.yml exec -T hdfs-namenode \
+  hdfs dfs -ls -R /naplatform
+```
+
+A minimal browser/API UAT should confirm:
+
+1. login succeeds;
+2. Workspace panel lists `workspace`, `chat_history`, and department shared roots;
+3. uploading a file in chat creates it in
+   `/naplatform/users/<username>/workspace`;
+4. editing/saving a workspace file updates HDFS;
+5. a simple chat request reaches the model/agent and produces a response;
+6. the completed session appears in HDFS `chat_history`.
+
+### Repository/branch handoff
+
+- `main` is the stable branch for this handoff release.
+- `dev` accumulates completed phase work and is merged to `main` only when the
+  user explicitly requests release/handoff.
+- The sibling `../core-webui` repository is required by the Compose build through
+  `CORE_WEBUI_CONTEXT=../core-webui`; keep its NAPlatform integration branch in
+  sync with this repository's release state.
+
 Phase 02 core-webui auth/agent adapter stub is ready: `GET /core-webui/session` bootstrap, `POST /agents/{department}/chat` (deterministic stub, RBAC-scoped), `GET /resources/{department}` HDFS-root enforcement, and `GET /admin/approvals/pending`. Real Hermes invocation is the next phase.
 
 ## Phase 03 — Persistent auth/RBAC (Postgres-ready, Redis-ready)
