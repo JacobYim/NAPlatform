@@ -29,12 +29,23 @@ CORE_WEBUI_CONTEXT=../core-webui UI_HOST_PORT=3001 \
   up -d --build --remove-orphans
 ```
 
+If host ports `8080` or `9000` are already occupied, override only the host-side
+ports; internal Compose service URLs stay `api:8080` and `hdfs-namenode:9000`:
+
+```bash
+CORE_WEBUI_CONTEXT=../core-webui \
+UI_HOST_PORT=3001 API_HOST_PORT=18080 \
+HDFS_NAMENODE_WEB_HOST_PORT=19870 HDFS_NAMENODE_RPC_HOST_PORT=19000 \
+  docker compose -f docker-compose.yml -f docker-compose.model-runner.yml \
+  up -d --build --remove-orphans
+```
+
 Health checks:
 
 ```bash
-curl -fsS http://localhost:8080/health
-curl -fsS http://localhost:3001/health
-CORE_WEBUI_CONTEXT=../core-webui UI_HOST_PORT=3001 \
+curl -fsS http://localhost:${API_HOST_PORT:-8080}/health
+curl -fsS http://localhost:${UI_HOST_PORT:-3000}/health
+CORE_WEBUI_CONTEXT=../core-webui UI_HOST_PORT=${UI_HOST_PORT:-3000} \
   docker compose -f docker-compose.yml -f docker-compose.model-runner.yml ps
 ```
 
@@ -45,9 +56,9 @@ services even when Compose does not report a formal health column for all of the
 
 ### Login and routing baseline
 
-- WebUI: `http://localhost:3001/login`
-- API: `http://localhost:8080`
-- NameNode UI: `http://localhost:9870`
+- WebUI: `http://localhost:${UI_HOST_PORT:-3000}/login` (handoff examples use `3001`)
+- API: `http://localhost:${API_HOST_PORT:-8080}`
+- NameNode UI: `http://localhost:${HDFS_NAMENODE_WEB_HOST_PORT:-9870}`
 - Seed admin email: `admin@example.com`
 - Seed admin password comes from `ADMIN_PASSWORD`; local dev defaults are defined
   in `services/api/app/config.py`/Compose environment. Do not commit real
@@ -120,9 +131,9 @@ pytest -q tests/test_chat_upload_attachment_paths.py \
 Then verify the live stack:
 
 ```bash
-curl -fsS http://localhost:8080/health
-curl -fsS http://localhost:3001/health
-MSYS_NO_PATHCONV=1 CORE_WEBUI_CONTEXT=../core-webui UI_HOST_PORT=3001 \
+curl -fsS http://localhost:${API_HOST_PORT:-8080}/health
+curl -fsS http://localhost:${UI_HOST_PORT:-3000}/health
+MSYS_NO_PATHCONV=1 CORE_WEBUI_CONTEXT=../core-webui UI_HOST_PORT=${UI_HOST_PORT:-3000} \
   docker compose -f docker-compose.yml -f docker-compose.model-runner.yml exec -T hdfs-namenode \
   hdfs dfs -ls -R /naplatform
 ```
@@ -575,8 +586,21 @@ Redis/Postgres, and core-webui — run the override **without any service name**
 cd /c/Users/jyim67/Documents/NAPlatform-work/NAPlatform
 
 # If localhost:3000 is occupied, keep UI_HOST_PORT=3001 and open http://localhost:3001.
-# If 3000 is free, omit UI_HOST_PORT and open http://localhost:3000.
-CORE_WEBUI_CONTEXT=../core-webui UI_HOST_PORT=3001 \
+# If host 8080 or 9000 is occupied, override API_HOST_PORT / HDFS_NAMENODE_RPC_HOST_PORT.
+CORE_WEBUI_CONTEXT=../core-webui \
+UI_HOST_PORT=3001 API_HOST_PORT=${API_HOST_PORT:-8080} \
+HDFS_NAMENODE_WEB_HOST_PORT=${HDFS_NAMENODE_WEB_HOST_PORT:-9870} \
+HDFS_NAMENODE_RPC_HOST_PORT=${HDFS_NAMENODE_RPC_HOST_PORT:-9000} \
+  docker compose -f docker-compose.yml -f docker-compose.model-runner.yml \
+  up -d --build --remove-orphans
+```
+
+For example, if host `8080` and `9000` are already used:
+
+```bash
+CORE_WEBUI_CONTEXT=../core-webui \
+UI_HOST_PORT=3001 API_HOST_PORT=18080 \
+HDFS_NAMENODE_WEB_HOST_PORT=19870 HDFS_NAMENODE_RPC_HOST_PORT=19000 \
   docker compose -f docker-compose.yml -f docker-compose.model-runner.yml \
   up -d --build --remove-orphans
 ```
@@ -595,11 +619,11 @@ they appear as `Exited (0)` after they finish.
 Check everything:
 
 ```bash
-CORE_WEBUI_CONTEXT=../core-webui UI_HOST_PORT=3001 \
+CORE_WEBUI_CONTEXT=../core-webui UI_HOST_PORT=${UI_HOST_PORT:-3001} \
   docker compose -f docker-compose.yml -f docker-compose.model-runner.yml ps
 
-curl -fsS http://localhost:8080/health
-curl -fsS http://localhost:3001/health   # use 3000 if UI_HOST_PORT was omitted
+curl -fsS http://localhost:${API_HOST_PORT:-8080}/health
+curl -fsS http://localhost:${UI_HOST_PORT:-3001}/health   # use 3000 if UI_HOST_PORT was omitted
 ```
 
 Chat-specific checks:
